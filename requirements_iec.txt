@@ -1,0 +1,8 @@
+# AudioLDM-IEC 追加依存関係
+# 対話型進化的効果音生成システムに必要なパッケージ
+
+# Gradio Webインターフェース
+gradio>=4.0.0
+
+# 既存のAudioLDM依存関係は setup.py または requirements.txt に記載されています
+# このファイルは IEC 機能の追加要件のみを記載しています
