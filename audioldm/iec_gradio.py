@@ -300,12 +300,13 @@ def create_gradio_interface(
     }
     """
     
-    with gr.Blocks(title="AudioLDM-IEC: 対話型進化的効果音生成", css=custom_css) as demo:
+    with gr.Blocks(title="Demo", css=custom_css) as demo:
         gr.Markdown("""
+        <!-- 
         # 🎵 AudioLDM-IEC: 対話型進化的効果音生成システム
         
         このシステムは、進化計算を用いて理想の効果音を探索します。
-        
+        -->
         ## 使い方
         1. **初期化**: プロンプトを入力して初期個体群を生成
         2. **選択**: 気に入った音声を選択
@@ -320,7 +321,7 @@ def create_gradio_interface(
                     gr.Markdown("### 🚀 初期化")
                     prompt_input = gr.Textbox(
                         label="プロンプト (空欄でランダム生成)",
-                        placeholder="例: 爆発音、雷の音、ドアが閉まる音",
+                        placeholder="",
                         value=""
                     )
                     variation_strength_slider = gr.Slider(
@@ -329,12 +330,13 @@ def create_gradio_interface(
                         value=0.3,
                         step=0.05,
                         label="初期変異強度",
-                        info="プロンプトからの変化の大きさ"
+                        info="プロンプトからの変化の大きさ",
+                        visible=False
                     )
                     init_button = gr.Button("🎲 初期個体群を生成", variant="primary", size="lg")
                 
                 # 進化パラメータ
-                with gr.Group():
+                with gr.Group(visible=False):
                     gr.Markdown("### ⚙️ 進化パラメータ")
                     mutation_rate_slider = gr.Slider(
                         minimum=0.0,
@@ -468,6 +470,7 @@ def create_gradio_interface(
         
         # 使用方法の説明
         gr.Markdown("""
+        <!--
         ---
         ## 📖 詳細ガイド
         
@@ -489,6 +492,7 @@ def create_gradio_interface(
         
         本システムは、**主観的評価に基づく対話型進化的効果音生成**の研究プロトタイプです。
         言語化困難な「理想の音」を、聴覚フィードバックと進化計算により探索します。
+        -->
         """)
     
     return demo
