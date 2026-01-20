@@ -136,7 +136,8 @@ class AudioLDM_IEC:
     
     def initialize_population(
         self,
-        prompt: Optional[str] = None
+        prompt: Optional[str] = None,
+        variation_strength: float = 0.3
     ) -> List[Tuple[AudioGenotype, np.ndarray]]:
         """
         初期個体群を生成
