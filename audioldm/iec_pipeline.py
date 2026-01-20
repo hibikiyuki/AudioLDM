@@ -97,40 +97,42 @@ class AudioLDM_IEC:
         if unconditional_guidance_scale is None:
             unconditional_guidance_scale = self.guidance_scale
         
-        with torch.no_grad():
-            # 潜在ベクトルを取得
-            x_T = genotype.latent_noise.to(self.device)
-            
-            # テキスト条件付けを取得
-            if text:
-                c = self.latent_diffusion.get_learned_conditioning([text])
-            else:
-                c = self.latent_diffusion.get_learned_conditioning([" "])
-            
-            # Unconditional conditioning
-            uc = self.latent_diffusion.get_learned_conditioning([" "])
-            
-            # sample_logを直接呼び出し（x_Tを渡せる）
-            samples, _ = self.latent_diffusion.sample_log(
-                cond=c,
-                batch_size=1,
-                ddim=True,
-                ddim_steps=self.ddim_steps,
-                eta=ddim_eta,
-                unconditional_guidance_scale=unconditional_guidance_scale,
-                unconditional_conditioning=uc,
-                x_T=x_T,
-            )
-            
-            # サンプルのクリッピング
-            if torch.max(torch.abs(samples)) > 1e2:
-                samples = torch.clip(samples, min=-10, max=10)
-            
-            # 潜在空間からメルスペクトログラムへデコード
-            mel = self.latent_diffusion.decode_first_stage(samples)
-            
-            # メルスペクトログラムから音声波形へ変換
-            waveform = self.latent_diffusion.mel_spectrogram_to_waveform(mel)
+        # EMAモデルを使用して生成（品質向上のため）
+        with self.latent_diffusion.ema_scope("IEC Generation"):
+            with torch.no_grad():
+                # 潜在ベクトルを取得
+                x_T = genotype.latent_noise.to(self.device)
+                
+                # テキスト条件付けを取得
+                if text:
+                    c = self.latent_diffusion.get_learned_conditioning([text])
+                else:
+                    c = self.latent_diffusion.get_learned_conditioning([" "])
+                
+                # Unconditional conditioning
+                uc = self.latent_diffusion.get_learned_conditioning([" "])
+                
+                # sample_logを直接呼び出し（x_Tを渡せる）
+                samples, _ = self.latent_diffusion.sample_log(
+                    cond=c,
+                    batch_size=1,
+                    ddim=True,
+                    ddim_steps=self.ddim_steps,
+                    eta=ddim_eta,
+                    unconditional_guidance_scale=unconditional_guidance_scale,
+                    unconditional_conditioning=uc,
+                    x_T=x_T,
+                )
+                
+                # サンプルのクリッピング
+                if torch.max(torch.abs(samples)) > 1e2:
+                    samples = torch.clip(samples, min=-10, max=10)
+                
+                # 潜在空間からメルスペクトログラムへデコード
+                mel = self.latent_diffusion.decode_first_stage(samples)
+                
+                # メルスペクトログラムから音声波形へ変換
+                waveform = self.latent_diffusion.mel_spectrogram_to_waveform(mel)
         
         return waveform
     
