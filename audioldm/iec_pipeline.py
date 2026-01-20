@@ -79,7 +79,8 @@ class AudioLDM_IEC:
         self,
         genotype: AudioGenotype,
         text: str = "",
-        unconditional_guidance_scale: Optional[float] = None
+        unconditional_guidance_scale: Optional[float] = None,
+        ddim_eta: float = 1.0
     ) -> np.ndarray:
         """
         遺伝子型から音声を生成
@@ -88,6 +89,7 @@ class AudioLDM_IEC:
             genotype: 音声遺伝子型（潜在ベクトルを含む）
             text: プロンプトテキスト
             unconditional_guidance_scale: ガイダンススケール
+            ddim_eta: DDIMサンプリングのeta（確率性を制御）
         
         Returns:
             生成された音声波形 (numpy array)
@@ -114,6 +116,7 @@ class AudioLDM_IEC:
                 batch_size=1,
                 ddim=True,
                 ddim_steps=self.ddim_steps,
+                eta=ddim_eta,
                 unconditional_guidance_scale=unconditional_guidance_scale,
                 unconditional_conditioning=uc,
                 x_T=x_T,
@@ -133,15 +136,13 @@ class AudioLDM_IEC:
     
     def initialize_population(
         self,
-        prompt: Optional[str] = None,
-        variation_strength: float = 0.3
+        prompt: Optional[str] = None
     ) -> List[Tuple[AudioGenotype, np.ndarray]]:
         """
         初期個体群を生成
         
         Args:
             prompt: 初期プロンプト (Noneの場合はランダム生成=空プロンプト)
-            variation_strength: プロンプトからの初期変異強度
         
         Returns:
             (遺伝子型, 音声波形) のリスト
@@ -156,32 +157,24 @@ class AudioLDM_IEC:
         
         # プロンプトベースの初期個体群を生成
         if prompt:
-            # テキスト条件付けベクトルを取得
+            # テキスト条件付けベクトルを取得（全個体で共通）
             text_embedding = self.latent_diffusion.get_learned_conditioning([prompt])
-            
-            # ベース潜在ベクトルを生成
-            base_latent = torch.randn((1,) + self.latent_shape, device=self.device)
             
             genotypes = []
             for i in range(self.population_size):
-                # ベースに変異を加える
-                noise = torch.randn_like(base_latent) * variation_strength
-                latent_noise = base_latent + noise
-                
-                # 条件付けにも変異を加える（オプション）
-                cond_noise = torch.randn_like(text_embedding) * (variation_strength * 0.3)
-                conditioning = text_embedding + cond_noise
+                # 各個体に完全に独立したランダムノイズを生成
+                latent_noise = torch.randn((1,) + self.latent_shape, device=self.device)
                 
                 genotype = AudioGenotype(
                     latent_noise=latent_noise,
-                    conditioning=conditioning,
+                    conditioning=text_embedding,  # 条件付けは共通（ノイズを加えない）
                     seed=np.random.randint(0, 2**31 - 1),
-                    metadata={"initialization": "from_prompt", "prompt": prompt, "variation_strength": variation_strength}
+                    metadata={"initialization": "from_prompt", "prompt": prompt}
                 )
                 genotype.generation = self.population.generation_number
                 genotypes.append(genotype)
         else:
-            # ランダム初期化
+            # ランダム初期化（各個体に完全に独立したランダムノイズ）
             genotypes = []
             for i in range(self.population_size):
                 latent_noise = torch.randn((1,) + self.latent_shape, device=self.device)
