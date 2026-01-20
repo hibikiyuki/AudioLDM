@@ -23,7 +23,7 @@ def main():
   python scripts/launch_iec_gradio.py
 
   # カスタム設定で起動
-  python scripts/launch_iec_gradio.py --population_size 6 --duration 2.5 --port 8080
+  python scripts/launch_iec_gradio.py --model_name audioldm-m-full --population_size 6 --duration 2.5 --port 8080
 
   # 公開リンクを生成
   python scripts/launch_iec_gradio.py --share

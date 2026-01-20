@@ -27,7 +27,7 @@ class AudioLDM_IEC:
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         population_size: int = 6,
         duration: float = 5.0,
-        guidance_scale: float = 3.5,
+        guidance_scale: float = 2.5,
         ddim_steps: int = 200,
         n_candidate_gen_per_text: int = 1,
     ):
