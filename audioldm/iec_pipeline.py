@@ -100,17 +100,33 @@ class AudioLDM_IEC:
         # EMAモデルを使用して生成（品質向上のため）
         with self.latent_diffusion.ema_scope("IEC Generation"):
             with torch.no_grad():
+                # 遺伝子型のseedを使用してランダム状態を設定（再現性のため）
+                if genotype.seed is not None:
+                    # PyTorchのランダム状態を設定
+                    torch.manual_seed(genotype.seed)
+                    if torch.cuda.is_available():
+                        torch.cuda.manual_seed(genotype.seed)
+                    # NumPyのランダム状態も設定
+                    np.random.seed(genotype.seed % (2**32))
+                
                 # 潜在ベクトルを取得
                 x_T = genotype.latent_noise.to(self.device)
                 
-                # テキスト条件付けを取得
+                # テキスト条件付けを取得（通常のAudioLDMと同じ方法）
                 if text:
-                    c = self.latent_diffusion.get_learned_conditioning([text])
+                    # 単一テキストの場合、2つ複製してから1つ取る（CLAPモデルの仕様）
+                    c = self.latent_diffusion.cond_stage_model([text, text])
+                    c = c[0:1]
                 else:
-                    c = self.latent_diffusion.get_learned_conditioning([" "])
+                    # 空文字列の場合も同様
+                    c = self.latent_diffusion.cond_stage_model([" ", " "])
+                    c = c[0:1]
                 
-                # Unconditional conditioning
-                uc = self.latent_diffusion.get_learned_conditioning([" "])
+                # Unconditional conditioningを適切に生成
+                if unconditional_guidance_scale != 1.0:
+                    uc = self.latent_diffusion.cond_stage_model.get_unconditional_condition(1)
+                else:
+                    uc = None
                 
                 # sample_logを直接呼び出し（x_Tを渡せる）
                 samples, _ = self.latent_diffusion.sample_log(
@@ -146,6 +162,7 @@ class AudioLDM_IEC:
         
         Args:
             prompt: 初期プロンプト (Noneの場合はランダム生成=空プロンプト)
+            variation_strength: 未使用（互換性のため残存）
         
         Returns:
             (遺伝子型, 音声波形) のリスト
@@ -161,17 +178,23 @@ class AudioLDM_IEC:
         # プロンプトベースの初期個体群を生成
         if prompt:
             # テキスト条件付けベクトルを取得（全個体で共通）
-            text_embedding = self.latent_diffusion.get_learned_conditioning([prompt])
+            # 通常のAudioLDMと同じ方法：単一テキストは2つ複製してから1つ取る
+            text_embedding = self.latent_diffusion.cond_stage_model([prompt, prompt])
+            text_embedding = text_embedding[0:1]
             
             genotypes = []
             for i in range(self.population_size):
-                # 各個体に完全に独立したランダムノイズを生成
-                latent_noise = torch.randn((1,) + self.latent_shape, device=self.device)
+                # 各個体に完全に独立したseedを生成
+                seed = np.random.randint(0, 2**32 - 1)
+                
+                # seedを使用してランダムノイズを生成
+                generator = torch.Generator(device=self.device).manual_seed(seed)
+                latent_noise = torch.randn((1,) + self.latent_shape, device=self.device, generator=generator)
                 
                 genotype = AudioGenotype(
                     latent_noise=latent_noise,
                     conditioning=text_embedding,  # 条件付けは共通（ノイズを加えない）
-                    seed=np.random.randint(0, 2**31 - 1),
+                    seed=seed,
                     metadata={"initialization": "from_prompt", "prompt": prompt}
                 )
                 genotype.generation = self.population.generation_number
@@ -180,11 +203,17 @@ class AudioLDM_IEC:
             # ランダム初期化（各個体に完全に独立したランダムノイズ）
             genotypes = []
             for i in range(self.population_size):
-                latent_noise = torch.randn((1,) + self.latent_shape, device=self.device)
+                # 各個体に完全に独立したseedを生成
+                seed = np.random.randint(0, 2**32 - 1)
+                
+                # seedを使用してランダムノイズを生成
+                generator = torch.Generator(device=self.device).manual_seed(seed)
+                latent_noise = torch.randn((1,) + self.latent_shape, device=self.device, generator=generator)
+                
                 genotype = AudioGenotype(
                     latent_noise=latent_noise,
                     conditioning=None,
-                    seed=np.random.randint(0, 2**31 - 1),
+                    seed=seed,
                     metadata={"initialization": "random", "prompt": prompt}
                 )
                 genotype.generation = self.population.generation_number

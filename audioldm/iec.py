@@ -117,18 +117,27 @@ def crossover_slerp(
     # 潜在ノイズの補間
     child_latent = slerp(parent1.latent_noise, parent2.latent_noise, alpha)
     
-    # 条件付けベクトルの補間 (存在する場合)
+    # 条件付けベクトルは補間せず、親1のものをそのまま使用
+    # (テキストエンベディングの補間は意味的整合性を損なうため)
     child_conditioning = None
-    if parent1.conditioning is not None and parent2.conditioning is not None:
-        child_conditioning = slerp(parent1.conditioning, parent2.conditioning, alpha)
+    if parent1.conditioning is not None:
+        child_conditioning = parent1.conditioning.clone()
+    elif parent2.conditioning is not None:
+        child_conditioning = parent2.conditioning.clone()
+    
+    # seedは新規生成（潜在ノイズが補間されているため、元のseedは無効）
+    child_seed = np.random.randint(0, 2**32 - 1)
     
     # 子個体の生成
     child = AudioGenotype(
         latent_noise=child_latent,
         conditioning=child_conditioning,
+        seed=child_seed,
         metadata={
             "parent1_id": parent1.id,
             "parent2_id": parent2.id,
+            "parent1_seed": parent1.seed,
+            "parent2_seed": parent2.seed,
             "crossover_alpha": alpha,
             "operation": "crossover_slerp"
         }
@@ -164,14 +173,17 @@ def mutate_gaussian(
     noise = torch.randn_like(mutant.latent_noise) * mutation_strength
     mutant.latent_noise = mutant.latent_noise + noise
     
-    # 条件付けベクトルに対する変異 (オプション: より慎重に)
-    if mutant.conditioning is not None and np.random.random() < mutation_rate * 0.5:
-        cond_noise = torch.randn_like(mutant.conditioning) * (mutation_strength * 0.5)
-        mutant.conditioning = mutant.conditioning + cond_noise
+    # 条件付けベクトルは変異させない
+    # (テキストエンベディングを変異させると、元のプロンプトの意味が変わってしまうため)
+    # mutant.conditioningはそのまま保持
+    
+    # seedは新規生成（潜在ノイズが変更されているため、元のseedは無効）
+    mutant.seed = np.random.randint(0, 2**32 - 1)
     
     # メタデータの更新
     mutant.metadata = {
         "parent_id": individual.id,
+        "parent_seed": individual.seed,
         "mutation_rate": mutation_rate,
         "mutation_strength": mutation_strength,
         "operation": "mutate_gaussian"
@@ -214,10 +226,16 @@ class IECPopulation:
         """
         self.current_generation = []
         for i in range(self.population_size):
-            latent_noise = torch.randn(latent_shape, device=device)
+            # 各個体に固有のseedを生成
+            seed = np.random.randint(0, 2**32 - 1)
+            
+            # seedを使用して潜在ノイズを生成
+            generator = torch.Generator(device=device).manual_seed(seed)
+            latent_noise = torch.randn(latent_shape, device=device, generator=generator)
+            
             genotype = AudioGenotype(
                 latent_noise=latent_noise,
-                seed=np.random.randint(0, 2**32 - 1),
+                seed=seed,
                 metadata={"initialization": "random"}
             )
             genotype.generation = self.generation_number
