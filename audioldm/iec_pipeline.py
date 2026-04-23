@@ -4,15 +4,12 @@ AudioLDMとIECを統合したパイプライン
 
 import torch
 import numpy as np
+import soundfile as sf
 from typing import List, Optional, Tuple, Dict
 import os
-from tqdm import tqdm
 
-from audioldm import LatentDiffusion
-from audioldm.pipeline import build_model, make_batch_for_text_to_audio, duration_to_latent_t_size
-from audioldm.latent_diffusion.ddim import DDIMSampler
-from audioldm.iec import AudioGenotype, IECPopulation
-from audioldm.utils import save_wave
+from audioldm.pipeline import build_model, duration_to_latent_t_size
+from audioldm.iec import AudioGenotype, IECPopulation, TransformGenotype, crossover_matrix_uniform, mutate_transform_gaussian
 
 
 class AudioLDM_IEC:
@@ -27,9 +24,10 @@ class AudioLDM_IEC:
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         population_size: int = 6,
         duration: float = 5.0,
-        guidance_scale: float = 2.5,
+        guidance_scale: float = 7.5, # ガイダンススケールのデフォルト値を7.5に設定
         ddim_steps: int = 200,
-        n_candidate_gen_per_text: int = 1,
+        n_candidate_gen_per_text: int = 3,
+        ga_mode: str = "latent",
     ):
         """
         Args:
@@ -41,6 +39,7 @@ class AudioLDM_IEC:
             guidance_scale: ガイダンススケール
             ddim_steps: DDIMサンプリングのステップ数
             n_candidate_gen_per_text: テキストごとの候補生成数
+            ga_mode: "latent" (潜在ノイズGA) または "transform" (変換行列GA)
         """
         self.device = device
         self.population_size = population_size
@@ -48,6 +47,8 @@ class AudioLDM_IEC:
         self.guidance_scale = guidance_scale
         self.ddim_steps = ddim_steps
         self.n_candidate_gen_per_text = n_candidate_gen_per_text
+        self.ga_mode = ga_mode
+        self._shared_base_noise: Optional[torch.Tensor] = None
         
         # AudioLDMモデルのロード
         print(f"AudioLDMモデルをロード中: {model_name}")
@@ -72,15 +73,121 @@ class AudioLDM_IEC:
         # IEC個体群の初期化
         self.population = IECPopulation(population_size=population_size)
         
-        print(f"初期化完了: 個体数={population_size}, 音声長={duration}秒, デバイス={device}")
+        print(f"初期化完了: 個体数={population_size}, 音声長={duration}秒, デバイス={device}, モード={ga_mode}")
         print(f"潜在空間形状: {self.latent_shape}")
-    
+
+    # ------------------------------------------------------------------
+    # 共通ヘルパー
+    # ------------------------------------------------------------------
+
+    def _get_or_create_base_noise(self, seed: Optional[int] = None) -> torch.Tensor:
+        """変換行列モード用の共有ベースノイズを取得・生成する。"""
+        if self._shared_base_noise is None:
+            if seed is not None:
+                generator = torch.Generator(device=self.device).manual_seed(seed)
+                self._shared_base_noise = torch.randn(
+                    (1,) + self.latent_shape, device=self.device, generator=generator
+                )
+            else:
+                self._shared_base_noise = torch.randn(
+                    (1,) + self.latent_shape, device=self.device
+                )
+            print(f"ベースノイズを生成しました (seed={seed})")
+        return self._shared_base_noise
+
+    def _sample_audio(
+        self,
+        x_T: torch.Tensor,
+        text: str = "",
+        unconditional_guidance_scale: Optional[float] = None,
+        ddim_eta: float = 0.0,
+    ) -> np.ndarray:
+        """x_T とテキストから音声波形を生成する共通ルーチン。"""
+        return self._sample_audio_batch([x_T], text=text,
+                                        unconditional_guidance_scale=unconditional_guidance_scale,
+                                        ddim_eta=ddim_eta)[0]
+
+    def _sample_audio_batch(
+        self,
+        x_T_list: List[torch.Tensor],
+        text: str = "",
+        unconditional_guidance_scale: Optional[float] = None,
+        ddim_eta: float = 0.0,
+    ) -> List[np.ndarray]:
+        """複数のx_Tをバッチ処理して音声波形リストを返す。テキスト条件・DDIMは1回だけ実行。"""
+        if unconditional_guidance_scale is None:
+            unconditional_guidance_scale = self.guidance_scale
+
+        n = len(x_T_list)
+
+        with self.latent_diffusion.ema_scope("IEC Generation"):
+            with torch.no_grad():
+                if text:
+                    c_single = self.latent_diffusion.cond_stage_model([text, text])
+                    c_single = c_single[0:1]
+                else:
+                    c_single = self.latent_diffusion.cond_stage_model([" ", " "])
+                    c_single = c_single[0:1]
+
+                c = torch.cat([c_single] * n, dim=0)
+
+                uc = (
+                    self.latent_diffusion.cond_stage_model.get_unconditional_condition(n)
+                    if unconditional_guidance_scale != 1.0
+                    else None
+                )
+
+                x_T_batch = torch.cat(x_T_list, dim=0)
+
+                samples, _ = self.latent_diffusion.sample_log(
+                    cond=c,
+                    batch_size=n,
+                    ddim=True,
+                    ddim_steps=self.ddim_steps,
+                    eta=ddim_eta,
+                    unconditional_guidance_scale=unconditional_guidance_scale,
+                    unconditional_conditioning=uc,
+                    x_T=x_T_batch,
+                )
+
+                if torch.max(torch.abs(samples)) > 1e2:
+                    samples = torch.clip(samples, min=-10, max=10)
+
+                mel = self.latent_diffusion.decode_first_stage(samples)
+                waveform_batch = self.latent_diffusion.mel_spectrogram_to_waveform(mel)
+
+        return [waveform_batch[i:i+1] for i in range(n)]
+
+    def _generate_audio_from_any_genotype(
+        self,
+        genotype,
+        text: str = "",
+        unconditional_guidance_scale: Optional[float] = None,
+        ddim_eta: float = 0.0,
+    ) -> np.ndarray:
+        """AudioGenotype / TransformGenotype を問わず音声を生成するディスパッチャ。"""
+        if isinstance(genotype, TransformGenotype):
+            return self._generate_audio_from_transform_genotype(
+                genotype, text=text,
+                unconditional_guidance_scale=unconditional_guidance_scale,
+                ddim_eta=ddim_eta,
+            )
+        return self._generate_audio_from_genotype(
+            genotype, text=text,
+            unconditional_guidance_scale=unconditional_guidance_scale,
+            ddim_eta=ddim_eta,
+        )
+
+    # ------------------------------------------------------------------
+    # 潜在ノイズ GA（既存モード）
+    # ------------------------------------------------------------------
+
     def _generate_audio_from_genotype(
         self,
         genotype: AudioGenotype,
         text: str = "",
         unconditional_guidance_scale: Optional[float] = None,
-        ddim_eta: float = 1.0
+        ddim_eta: float = 0.0
     ) -> np.ndarray:
         """
         遺伝子型から音声を生成
@@ -94,80 +201,158 @@ class AudioLDM_IEC:
         Returns:
             生成された音声波形 (numpy array)
         """
-        if unconditional_guidance_scale is None:
-            unconditional_guidance_scale = self.guidance_scale
-        
-        # EMAモデルを使用して生成（品質向上のため）
-        with self.latent_diffusion.ema_scope("IEC Generation"):
-            with torch.no_grad():
-                # 遺伝子型のseedを使用してランダム状態を設定（再現性のため）
-                if genotype.seed is not None:
-                    # PyTorchのランダム状態を設定
-                    torch.manual_seed(genotype.seed)
-                    if torch.cuda.is_available():
-                        torch.cuda.manual_seed(genotype.seed)
-                    # NumPyのランダム状態も設定
-                    np.random.seed(genotype.seed % (2**32))
-                
-                # 潜在ベクトルを取得
-                x_T = genotype.latent_noise.to(self.device)
-                
-                # テキスト条件付けを取得（通常のAudioLDMと同じ方法）
-                if text:
-                    # 単一テキストの場合、2つ複製してから1つ取る（CLAPモデルの仕様）
-                    c = self.latent_diffusion.cond_stage_model([text, text])
-                    c = c[0:1]
-                else:
-                    # 空文字列の場合も同様
-                    c = self.latent_diffusion.cond_stage_model([" ", " "])
-                    c = c[0:1]
-                
-                # Unconditional conditioningを適切に生成
-                if unconditional_guidance_scale != 1.0:
-                    uc = self.latent_diffusion.cond_stage_model.get_unconditional_condition(1)
-                else:
-                    uc = None
-                
-                # sample_logを直接呼び出し（x_Tを渡せる）
-                samples, _ = self.latent_diffusion.sample_log(
-                    cond=c,
-                    batch_size=1,
-                    ddim=True,
-                    ddim_steps=self.ddim_steps,
-                    eta=ddim_eta,
-                    unconditional_guidance_scale=unconditional_guidance_scale,
-                    unconditional_conditioning=uc,
-                    x_T=x_T,
-                )
-                
-                # サンプルのクリッピング
-                if torch.max(torch.abs(samples)) > 1e2:
-                    samples = torch.clip(samples, min=-10, max=10)
-                
-                # 潜在空間からメルスペクトログラムへデコード
-                mel = self.latent_diffusion.decode_first_stage(samples)
-                
-                # メルスペクトログラムから音声波形へ変換
-                waveform = self.latent_diffusion.mel_spectrogram_to_waveform(mel)
-        
-        return waveform
-    
+        if genotype.seed is not None:
+            torch.manual_seed(genotype.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed(genotype.seed)
+            np.random.seed(genotype.seed % (2**32))
+
+        x_T = genotype.latent_noise.to(self.device)
+        return self._sample_audio(x_T, text=text,
+                                  unconditional_guidance_scale=unconditional_guidance_scale,
+                                  ddim_eta=ddim_eta)
+
+    # ------------------------------------------------------------------
+    # 変換行列 GA（新モード）
+    # ------------------------------------------------------------------
+
+    def _generate_audio_from_transform_genotype(
+        self,
+        genotype: TransformGenotype,
+        text: str = "",
+        unconditional_guidance_scale: Optional[float] = None,
+        ddim_eta: float = 0.0,
+    ) -> np.ndarray:
+        """変換行列遺伝子型から音声を生成する。"""
+        x_T = genotype.get_transformed_noise().to(self.device)
+        return self._sample_audio(x_T, text=text,
+                                  unconditional_guidance_scale=unconditional_guidance_scale,
+                                  ddim_eta=ddim_eta)
+
+    def initialize_population_transform(
+        self,
+        prompt: Optional[str] = None,
+        base_noise_seed: Optional[int] = None,
+    ) -> List[Tuple[TransformGenotype, np.ndarray]]:
+        """
+        変換行列モードで初期個体群を生成する。
+
+        各個体の変換行列は N(0, I) からサンプルした C×C 行列で初期化する（論文 Sec. C.1 に準拠）。
+        ベースノイズ z_T はセッション全体で共有される。
+        """
+        print(f"[変換行列モード] 第{self.population.generation_number}世代を生成中...")
+        if prompt is None:
+            prompt = ""
+
+        base_noise = self._get_or_create_base_noise(seed=base_noise_seed)
+        C = self.latent_shape[0]
+
+        genotypes: List[TransformGenotype] = []
+        for _ in range(self.population_size):
+            seed = np.random.randint(0, 2**32 - 1)
+            torch.manual_seed(seed)
+            M = torch.randn(C, C, device=self.device)  # N(0,I) → QR → ランダム直交行列 (論文準拠)
+
+            g = TransformGenotype(
+                transform_matrix=M,
+                base_noise=base_noise,
+                seed=seed,
+                metadata={
+                    "ga_mode": "transform",
+                    "initialization": "random_gaussian",
+                    "prompt": prompt,
+                    "base_noise_seed": base_noise_seed,
+                }
+            )
+            g.generation = self.population.generation_number
+            genotypes.append(g)
+
+        self.population.current_generation = genotypes
+        self.population.history.append([g.clone() for g in genotypes])
+
+        x_T_list = [g.get_transformed_noise().to(self.device) for g in genotypes]
+        waveforms = self._sample_audio_batch(x_T_list, text=prompt)
+        return list(zip(genotypes, waveforms))
+
+    def evolve_population_transform(
+        self,
+        selected_indices: List[int],
+        mutation_strength: float = 0.1,
+        elite_count: int = 1,
+    ) -> List[Tuple[TransformGenotype, np.ndarray]]:
+        """
+        変換行列モードで次世代を生成する。
+
+        交叉: uniform crossover（論文 Sec. B.3, B.5 に準拠）
+        突然変異: 行列にガウスノイズを加算（σ = mutation_strength）
+        """
+        print(f"\n[変換行列モード] 第{self.population.generation_number + 1}世代を生成中...")
+        if not selected_indices:
+            raise ValueError("少なくとも1つの個体を選択してください")
+
+        selected = [self.population.current_generation[i] for i in selected_indices]
+        prompt = selected[0].metadata.get("prompt", "")
+
+        next_gen: List[TransformGenotype] = []
+
+        for i in range(min(elite_count, len(selected))):
+            elite = selected[i].clone()
+            elite.generation = self.population.generation_number + 1
+            elite.metadata["elite"] = True
+            next_gen.append(elite)
+
+        while len(next_gen) < self.population_size:
+            if len(selected) == 1:
+                child = mutate_transform_gaussian(selected[0], mutation_strength)
+            else:
+                p1, p2 = np.random.choice(selected, size=2, replace=False)
+                child = crossover_matrix_uniform(p1, p2)  # uniform crossover (論文 Sec. B.3, B.5)
+                child = mutate_transform_gaussian(child, mutation_strength)
+
+            child.generation = self.population.generation_number + 1
+            child.metadata["prompt"] = prompt
+            next_gen.append(child)
+
+        self.population.generation_number += 1
+        self.population.current_generation = next_gen[:self.population_size]
+        self.population.history.append([g.clone() for g in self.population.current_generation])
+
+        genotypes = self.population.current_generation
+        x_T_list = [g.get_transformed_noise().to(self.device) for g in genotypes]
+        waveforms = self._sample_audio_batch(x_T_list, text=prompt)
+        return list(zip(genotypes, waveforms))
+
+    # ------------------------------------------------------------------
+    # 公開 API（モードディスパッチ）
+    # ------------------------------------------------------------------
+
     def initialize_population(
         self,
         prompt: Optional[str] = None,
-        variation_strength: float = 0.3
-    ) -> List[Tuple[AudioGenotype, np.ndarray]]:
+        variation_strength: float = 0.3,
+        ga_mode: Optional[str] = None,
+        base_noise_seed: Optional[int] = None,
+    ) -> List[Tuple]:
         """
-        初期個体群を生成
-        
+        初期個体群を生成する。ga_mode を渡すと self.ga_mode を上書きできる。
+
         Args:
-            prompt: 初期プロンプト (Noneの場合はランダム生成=空プロンプト)
+            prompt: 初期プロンプト (None で無条件生成)
             variation_strength: 未使用（互換性のため残存）
-        
-        Returns:
-            (遺伝子型, 音声波形) のリスト
+            ga_mode: "latent" または "transform"（省略時は self.ga_mode を使用）
+            base_noise_seed: 変換行列モード用ベースノイズの seed
         """
-        print(f"第{self.population.generation_number}世代の個体群を生成中...")
+        if ga_mode is not None:
+            self.ga_mode = ga_mode
+            # モード切替時はベースノイズをリセット
+            self._shared_base_noise = None
+
+        if self.ga_mode == "transform":
+            return self.initialize_population_transform(
+                prompt=prompt, base_noise_seed=base_noise_seed
+            )
+
+        print(f"[潜在ノイズモード] 第{self.population.generation_number}世代の個体群を生成中...")
         
         if prompt is None:
             prompt = ""
@@ -183,14 +368,14 @@ class AudioLDM_IEC:
             text_embedding = text_embedding[0:1]
             
             genotypes = []
-            for i in range(self.population_size):
+            for _ in range(self.population_size):
                 # 各個体に完全に独立したseedを生成
                 seed = np.random.randint(0, 2**32 - 1)
-                
+
                 # seedを使用してランダムノイズを生成
                 generator = torch.Generator(device=self.device).manual_seed(seed)
                 latent_noise = torch.randn((1,) + self.latent_shape, device=self.device, generator=generator)
-                
+
                 genotype = AudioGenotype(
                     latent_noise=latent_noise,
                     conditioning=text_embedding,  # 条件付けは共通（ノイズを加えない）
@@ -202,7 +387,7 @@ class AudioLDM_IEC:
         else:
             # ランダム初期化（各個体に完全に独立したランダムノイズ）
             genotypes = []
-            for i in range(self.population_size):
+            for _ in range(self.population_size):
                 # 各個体に完全に独立したseedを生成
                 seed = np.random.randint(0, 2**32 - 1)
                 
@@ -221,90 +406,67 @@ class AudioLDM_IEC:
         
         self.population.current_generation = genotypes
         self.population.history.append([g.clone() for g in genotypes])
-        
-        # 各個体から音声を生成
-        results = []
-        for i, genotype in enumerate(tqdm(genotypes, desc="音声生成中")):
-            waveform = self._generate_audio_from_genotype(genotype, text=prompt)
-            results.append((genotype, waveform))
-        
-        return results
-    
+
+        x_T_list = [g.latent_noise.to(self.device) for g in genotypes]
+        waveforms = self._sample_audio_batch(x_T_list, text=prompt)
+        return list(zip(genotypes, waveforms))
+
     def evolve_population(
         self,
         selected_indices: List[int],
         mutation_rate: float = 0.3,
         mutation_strength: float = 0.15,
-        elite_count: int = 1
-    ) -> List[Tuple[AudioGenotype, np.ndarray]]:
-        """
-        選択された個体から次世代を生成
-        
-        Args:
-            selected_indices: 選択された個体のインデックスリスト
-            mutation_rate: 突然変異率
-            mutation_strength: 突然変異強度
-            elite_count: エリート保存数
-        
-        Returns:
-            (遺伝子型, 音声波形) のリスト
-        """
-        print(f"\n第{self.population.generation_number + 1}世代を生成中...")
+        elite_count: int = 1,
+    ) -> List[Tuple]:
+        """選択された個体から次世代を生成する（モードに応じてディスパッチ）。"""
+        if self.ga_mode == "transform":
+            return self.evolve_population_transform(
+                selected_indices,
+                mutation_strength=mutation_strength,
+                elite_count=elite_count,
+            )
+
+        print(f"\n[潜在ノイズモード] 第{self.population.generation_number + 1}世代を生成中...")
         print(f"選択された個体: {selected_indices}")
-        
-        if len(selected_indices) == 0:
+
+        if not selected_indices:
             raise ValueError("少なくとも1つの個体を選択してください")
-        
-        # 選択された個体を取得
+
         selected = [self.population.current_generation[i] for i in selected_indices]
-        
-        # プロンプトを取得（最初の選択個体から）
         prompt = selected[0].metadata.get("prompt", "")
-        
-        # IECの進化関数を使用
+
         from audioldm.iec import crossover_slerp, mutate_gaussian
-        
+
         next_generation = []
-        
-        # エリート保存
+
         for i in range(min(elite_count, len(selected))):
             elite = selected[i].clone()
             elite.generation = self.population.generation_number + 1
             elite.metadata["elite"] = True
             next_generation.append(elite)
-        
-        # 残りの個体を生成
+
         while len(next_generation) < self.population_size:
             if len(selected) == 1:
-                # 1つしか選択されていない場合は変異のみ
-                parent = selected[0]
-                child = mutate_gaussian(parent, mutation_rate, mutation_strength)
+                child = mutate_gaussian(selected[0], mutation_rate, mutation_strength)
             else:
-                # 2つの親から交叉
                 parent1, parent2 = np.random.choice(selected, size=2, replace=False)
                 alpha = np.random.uniform(0.3, 0.7)
                 child = crossover_slerp(parent1, parent2, alpha)
-                
-                # 交叉後に変異を適用
                 if np.random.random() < mutation_rate:
                     child = mutate_gaussian(child, 1.0, mutation_strength)
-            
+
             child.generation = self.population.generation_number + 1
             child.metadata["prompt"] = prompt
             next_generation.append(child)
-        
-        # 世代番号を更新
+
         self.population.generation_number += 1
         self.population.current_generation = next_generation[:self.population_size]
         self.population.history.append([g.clone() for g in self.population.current_generation])
-        
-        # 各個体から音声を生成
-        results = []
-        for i, genotype in enumerate(tqdm(self.population.current_generation, desc="音声生成中")):
-            waveform = self._generate_audio_from_genotype(genotype, text=prompt)
-            results.append((genotype, waveform))
-        
-        return results
+
+        genotypes = self.population.current_generation
+        x_T_list = [g.latent_noise.to(self.device) for g in genotypes]
+        waveforms = self._sample_audio_batch(x_T_list, text=prompt)
+        return list(zip(genotypes, waveforms))
     
     def save_generation_audio(
         self,
@@ -328,12 +490,10 @@ class AudioLDM_IEC:
         saved_paths = []
         gen_num = self.population.generation_number
         
-        for i, (genotype, waveform) in enumerate(generation_results):
+        for i, (_, waveform) in enumerate(generation_results):
             filename = f"{prefix}_gen{gen_num:03d}_ind{i:02d}.wav"
             filepath = os.path.join(output_dir, filename)
             
-            # 音声を保存
-            import soundfile as sf
             # waveformの形状: (batch, samples) または (batch, 1, samples)
             # モノラル音声として保存
             if len(waveform.shape) == 3:
@@ -406,7 +566,7 @@ def run_iec_session(
     print(f"\n初期個体群を生成しました: {len(saved_paths)}個")
     print("音声を聴いて、気に入った個体の番号を選択してください (スペース区切り)")
     
-    for generation in range(max_generations):
+    for _ in range(max_generations):
         print(f"\n--- 第{iec_system.population.generation_number}世代 ---")
         for i, path in enumerate(saved_paths):
             print(f"  [{i}] {os.path.basename(path)}")

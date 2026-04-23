@@ -408,6 +408,125 @@ class IECPopulation:
         print(f"履歴を保存しました: {filepath}")
 
 
+class TransformGenotype:
+    """
+    ノイズ変換行列を遺伝子とする個体。
+    固定ベースノイズ z_T に C×C 直交行列 Q(A) を適用して変換ノイズ z'_T を生成する。
+    z'_T = Q(A) @ z_T  （論文 Algorithm 2、Sec. 3.1 に準拠）
+    """
+
+    def __init__(
+        self,
+        transform_matrix: torch.Tensor,
+        base_noise: torch.Tensor,
+        seed: Optional[int] = None,
+        metadata: Optional[Dict] = None
+    ):
+        """
+        Args:
+            transform_matrix: チャンネル間混合行列 shape: (C, C)
+            base_noise: 固定ベースノイズ shape: (1, C, T, F) — セッション全体で共有
+            seed: ランダムシード
+            metadata: メタデータ
+        """
+        self.transform_matrix = transform_matrix.clone()
+        self.base_noise = base_noise  # 参照共有（書き換え禁止）
+        self.seed = seed
+        self.metadata = metadata or {}
+        self.fitness = 0.0
+        self.generation = 0
+        self.id = self._generate_id()
+
+    def _generate_id(self) -> str:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        return f"transform_{timestamp}"
+
+    def get_transformed_noise(self) -> torch.Tensor:
+        """
+        QR分解で直交行列 Q(A) を抽出し、ベースノイズに適用して x_T を返す。
+        z'_T = Q(A) @ z_base (論文 Algorithm 2 に準拠)
+        直交変換なので ||z'_T|| = ||z_base|| が保証され、ガウスシェル上に留まる。
+
+        Returns:
+            shape: (1, C, T, F)
+        """
+        C = self.base_noise.shape[1]
+        T = self.base_noise.shape[2]
+        F_size = self.base_noise.shape[3]
+
+        # QR分解で直交行列 Q を抽出（チャンネル次元のみ、論文 Sec. 3.1 に準拠）
+        Q, _ = torch.linalg.qr(self.transform_matrix)
+
+        x = self.base_noise[0].reshape(C, -1).to(Q.device)
+        x_transformed = Q @ x  # (C, C) @ (C, T*F) -> (C, T*F)
+
+        return x_transformed.reshape(1, C, T, F_size)
+
+    def clone(self) -> 'TransformGenotype':
+        cloned = TransformGenotype(
+            transform_matrix=self.transform_matrix.clone(),
+            base_noise=self.base_noise,
+            seed=self.seed,
+            metadata=self.metadata.copy()
+        )
+        cloned.fitness = self.fitness
+        cloned.generation = self.generation
+        return cloned
+
+
+
+def crossover_matrix_uniform(
+    parent1: 'TransformGenotype',
+    parent2: 'TransformGenotype',
+    p: float = 0.5
+) -> 'TransformGenotype':
+    """
+    座標ごとの uniform crossover (論文 Sec. B.3, B.5 に準拠)。
+    各要素を確率 p で parent1 から、確率 (1-p) で parent2 から独立に選択する。
+    直接ノイズ探索の uniform crossover と同じ操作を行列要素に適用。
+    """
+    mask = torch.bernoulli(
+        torch.full_like(parent1.transform_matrix, p)
+    ).bool()
+    child_matrix = torch.where(mask, parent1.transform_matrix, parent2.transform_matrix)
+
+    child = TransformGenotype(
+        transform_matrix=child_matrix,
+        base_noise=parent1.base_noise,
+        seed=np.random.randint(0, 2**32 - 1),
+        metadata={
+            "parent1_id": parent1.id,
+            "parent2_id": parent2.id,
+            "crossover_p": p,
+            "operation": "crossover_matrix_uniform",
+            "prompt": parent1.metadata.get("prompt", "")
+        }
+    )
+    child.generation = max(parent1.generation, parent2.generation) + 1
+    return child
+
+
+def mutate_transform_gaussian(
+    individual: 'TransformGenotype',
+    mutation_strength: float = 0.1
+) -> 'TransformGenotype':
+    """
+    ガウシアンノイズによる変換行列の突然変異。
+    """
+    mutant = individual.clone()
+    noise = torch.randn_like(mutant.transform_matrix) * mutation_strength
+    mutant.transform_matrix = mutant.transform_matrix + noise
+    mutant.seed = np.random.randint(0, 2**32 - 1)
+    mutant.metadata = {
+        "parent_id": individual.id,
+        "mutation_strength": mutation_strength,
+        "operation": "mutate_transform_gaussian",
+        "prompt": individual.metadata.get("prompt", "")
+    }
+    mutant.generation = individual.generation + 1
+    return mutant
+
+
 def adaptive_mutation_rate(generation: int, convergence_score: float = 0.0) -> float:
     """
     世代数と収束状況に応じて突然変異率を動的に調整

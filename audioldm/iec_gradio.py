@@ -28,13 +28,13 @@ class IECInterface:
     ):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
-        
-        # IECシステムの初期化
+
         print("AudioLDM-IECシステムを初期化中...")
         self.iec_system = AudioLDM_IEC(
             model_name=model_name,
             population_size=population_size,
-            duration=duration
+            duration=duration,
+            ga_mode="latent",
         )
         
         # セッション状態
@@ -54,6 +54,9 @@ class IECInterface:
         self,
         prompt: str,
         variation_strength: float,
+        ga_mode: str = "latent",
+        transform_init_std: float = 0.3,
+        base_noise_seed_str: str = "",
         progress=gr.Progress()
     ) -> Tuple[List, str, str]:
         """
@@ -63,20 +66,34 @@ class IECInterface:
             (音声リスト, 情報テキスト, ステータスメッセージ)
         """
         progress(0, desc="初期個体群を生成中...")
-        
+
         try:
-            # 初期個体群を生成
-            if prompt.strip() == "":
-                self.current_results = self.iec_system.initialize_population(
-                    prompt=None
-                )
-                message = "ランダムな初期個体群を生成しました"
+            # 変換行列モード用パラメータを反映
+            if ga_mode == "transform":
+                self.iec_system.transform_init_std = transform_init_std
+                self.iec_system._shared_base_noise = None  # 初期化時はリセット
+
+            base_noise_seed: Optional[int] = None
+            if base_noise_seed_str.strip():
+                try:
+                    base_noise_seed = int(base_noise_seed_str.strip())
+                except ValueError:
+                    pass
+
+            effective_prompt = prompt.strip() if prompt.strip() else None
+
+            self.current_results = self.iec_system.initialize_population(
+                prompt=effective_prompt,
+                variation_strength=variation_strength,
+                ga_mode=ga_mode,
+                base_noise_seed=base_noise_seed,
+            )
+
+            mode_label = "変換行列モード" if ga_mode == "transform" else "潜在ノイズモード"
+            if effective_prompt:
+                message = f"[{mode_label}] プロンプト '{effective_prompt}' から初期個体群を生成しました"
             else:
-                self.current_results = self.iec_system.initialize_population(
-                    prompt=prompt,
-                    variation_strength=variation_strength
-                )
-                message = f"プロンプト '{prompt}' から初期個体群を生成しました"
+                message = f"[{mode_label}] ランダムな初期個体群を生成しました"
             
             progress(0.5, desc="音声を保存中...")
             
@@ -189,10 +206,10 @@ class IECInterface:
         try:
             genotypes = self.iec_system.population.rollback_generation(steps)
             
-            # 音声を再生成
             self.current_results = []
             for genotype in genotypes:
-                waveform = self.iec_system._generate_audio_from_genotype(genotype)
+                prompt = genotype.metadata.get("prompt", "")
+                waveform = self.iec_system._generate_audio_from_any_genotype(genotype, text=prompt)
                 self.current_results.append((genotype, waveform))
             
             # 音声を保存
@@ -252,12 +269,14 @@ class IECInterface:
         """
         info = self.iec_system.get_generation_info()
         
+        mode_label = "変換行列GA" if self.iec_system.ga_mode == "transform" else "潜在ノイズGA"
         text = f"""
 ### 📊 現在の状態
 
 - **世代番号**: {info['generation_number']}
 - **個体数**: {info['population_size']}
 - **履歴**: {info['history_length']} 世代
+- **GA モード**: {mode_label}
 - **セッションID**: {self.session_id}
 - **インタラクション数**: {len(self.interaction_log)}
         """
@@ -324,26 +343,46 @@ def create_gradio_interface(
                         placeholder="",
                         value=""
                     )
+                    ga_mode_radio = gr.Radio(
+                        choices=["latent", "transform"],
+                        value="latent",
+                        label="GA モード",
+                        info="latent: 潜在ノイズを直接進化 / transform: 変換行列を進化（ノイズ変換探索）"
+                    )
                     variation_strength_slider = gr.Slider(
+                        visible=False,
                         minimum=0.0,
                         maximum=1.0,
                         value=0.3,
                         step=0.05,
                         label="初期変異強度",
-                        info="プロンプトからの変化の大きさ",
-                        visible=False
+                        info="プロンプトからの変化の大きさ (潜在ノイズモード用)"
                     )
+                    with gr.Group() as transform_init_group:
+                        transform_init_std_slider = gr.Slider(
+                            minimum=0.01,
+                            maximum=1.0,
+                            value=0.3,
+                            step=0.05,
+                            label="変換行列の初期摂動強度",
+                            info="単位行列からの初期ランダム摂動の大きさ (変換行列モード用)"
+                        )
+                        base_noise_seed_input = gr.Textbox(
+                            label="ベースノイズ seed (空欄でランダム)",
+                            placeholder="例: 42",
+                            value=""
+                        )
                     init_button = gr.Button("🎲 初期個体群を生成", variant="primary", size="lg")
-                
+
                 # 進化パラメータ
-                with gr.Group(visible=False):
+                with gr.Group(visible=True):
                     gr.Markdown("### ⚙️ 進化パラメータ")
                     mutation_rate_slider = gr.Slider(
                         minimum=0.0,
                         maximum=1.0,
                         value=0.3,
                         step=0.05,
-                        label="突然変異率",
+                        label="突然変異率 (潜在ノイズモード用)",
                         info="変異が起こる確率"
                     )
                     mutation_strength_slider = gr.Slider(
@@ -352,7 +391,7 @@ def create_gradio_interface(
                         value=0.15,
                         step=0.05,
                         label="突然変異強度",
-                        info="変異の大きさ"
+                        info="変異の大きさ (両モード共通)"
                     )
                     elite_count_slider = gr.Slider(
                         minimum=0,
@@ -362,12 +401,12 @@ def create_gradio_interface(
                         label="エリート保存数",
                         info="優秀個体をそのまま次世代に残す数"
                     )
-                
+
                 # コントロールボタン
                 with gr.Group():
                     gr.Markdown("### 🎮 コントロール")
                     evolve_button = gr.Button("🧬 次世代を生成", variant="primary", size="lg")
-                    
+
                     with gr.Row():
                         rollback_button = gr.Button("🔙 1世代戻る")
                         save_button = gr.Button("💾 セッション保存")
@@ -405,63 +444,52 @@ def create_gradio_interface(
         
         # 状態管理
         audio_paths_state = gr.State([])
-        
-        # イベントハンドラ
-        def init_wrapper(prompt, variation_strength):
-            audio_list, info, message = interface.initialize_generation(
-                prompt, variation_strength
-            )
-            # チェックボックスの選択肢を更新
+
+        def _pack_outputs(audio_list, info, message):
             choices = [f"個体 {i}" for i in range(len(audio_list))]
-            # 音声コンポーネントを更新
             outputs = audio_list + [None] * (population_size - len(audio_list))
-            # CheckboxGroupの更新: choices, value, info, message, state
             return outputs + [gr.CheckboxGroup(choices=choices, value=[]), info, message, audio_list]
-        
+
+        def init_wrapper(prompt, variation_strength, ga_mode, transform_init_std, base_noise_seed_str):
+            audio_list, info, message = interface.initialize_generation(
+                prompt, variation_strength, ga_mode, transform_init_std, base_noise_seed_str
+            )
+            return _pack_outputs(audio_list, info, message)
+
         def evolve_wrapper(selected_labels, mutation_rate, mutation_strength, elite_count):
-            # ラベルからインデックスを抽出
             selected_indices = [int(label.split()[-1]) for label in selected_labels]
-            
             audio_list, info, message = interface.evolve_generation(
                 selected_indices, mutation_rate, mutation_strength, elite_count
             )
-            # チェックボックスの選択肢を更新
-            choices = [f"個体 {i}" for i in range(len(audio_list))]
-            # 音声コンポーネントを更新
-            outputs = audio_list + [None] * (population_size - len(audio_list))
-            # CheckboxGroupの更新: choices, value, info, message, state
-            return outputs + [gr.CheckboxGroup(choices=choices, value=[]), info, message, audio_list]
-        
+            return _pack_outputs(audio_list, info, message)
+
         def rollback_wrapper():
             audio_list, info, message = interface.rollback_generation(steps=1)
-            choices = [f"個体 {i}" for i in range(len(audio_list))]
-            outputs = audio_list + [None] * (population_size - len(audio_list))
-            # CheckboxGroupの更新: choices, value, info, message, state
-            return outputs + [gr.CheckboxGroup(choices=choices, value=[]), info, message, audio_list]
-        
+            return _pack_outputs(audio_list, info, message)
+
         def save_wrapper():
-            message = interface.save_session()
-            return message
-        
+            return interface.save_session()
+
         # イベントの接続
         init_button.click(
             fn=init_wrapper,
-            inputs=[prompt_input, variation_strength_slider],
+            inputs=[prompt_input, variation_strength_slider, ga_mode_radio,
+                    transform_init_std_slider, base_noise_seed_input],
             outputs=audio_components + [selection_group, info_display, status_display, audio_paths_state]
         )
-        
+
         evolve_button.click(
             fn=evolve_wrapper,
             inputs=[selection_group, mutation_rate_slider, mutation_strength_slider, elite_count_slider],
             outputs=audio_components + [selection_group, info_display, status_display, audio_paths_state]
         )
-        
+
         rollback_button.click(
             fn=rollback_wrapper,
             inputs=[],
             outputs=audio_components + [selection_group, info_display, status_display, audio_paths_state]
         )
-        
+
         save_button.click(
             fn=save_wrapper,
             inputs=[],

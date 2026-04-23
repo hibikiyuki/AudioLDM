@@ -54,8 +54,8 @@ def main():
     parser.add_argument(
         "--port",
         type=int,
-        default=7860,
-        help="サーバーポート番号 (デフォルト: 7860)"
+        default=8080,
+        help="サーバーポート番号 (デフォルト: 8080)"
     )
     
     parser.add_argument(
