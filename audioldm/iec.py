@@ -527,6 +527,87 @@ def mutate_transform_gaussian(
     return mutant
 
 
+class LatentZ0Genotype:
+    """
+    DDIM逆拡散（デノイジング）で得られた潜在表現 z_0 を個体とする遺伝子型。
+    z_0 は VAE の潜在空間上の点であり、VAE デコードだけで音声に変換できる。
+    初期化時のみ DDIM が必要で、子の評価は VAE decode だけで済む。
+    """
+
+    def __init__(
+        self,
+        z0: torch.Tensor,
+        seed: Optional[int] = None,
+        metadata: Optional[Dict] = None
+    ):
+        """
+        Args:
+            z0: DDIM サンプリングで得られた潜在表現 shape: (1, C, T, F)
+            seed: 生成時の乱数シード
+            metadata: メタデータ
+        """
+        self.z0 = z0.clone()
+        self.seed = seed
+        self.metadata = metadata or {}
+        self.fitness = 0.0
+        self.generation = 0
+        self.id = self._generate_id()
+
+    def _generate_id(self) -> str:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        return f"z0_{timestamp}"
+
+    def clone(self) -> 'LatentZ0Genotype':
+        cloned = LatentZ0Genotype(
+            z0=self.z0.clone(),
+            seed=self.seed,
+            metadata=self.metadata.copy()
+        )
+        cloned.fitness = self.fitness
+        cloned.generation = self.generation
+        return cloned
+
+
+def crossover_z0_slerp(
+    parent1: 'LatentZ0Genotype',
+    parent2: 'LatentZ0Genotype',
+    alpha: float = 0.5
+) -> 'LatentZ0Genotype':
+    """z_0 空間での球面線形補間による交叉。"""
+    child_z0 = slerp(parent1.z0, parent2.z0, alpha)
+    child = LatentZ0Genotype(
+        z0=child_z0,
+        seed=np.random.randint(0, 2**32 - 1),
+        metadata={
+            "parent1_id": parent1.id,
+            "parent2_id": parent2.id,
+            "crossover_alpha": alpha,
+            "operation": "crossover_z0_slerp",
+            "prompt": parent1.metadata.get("prompt", "")
+        }
+    )
+    child.generation = max(parent1.generation, parent2.generation) + 1
+    return child
+
+
+def mutate_z0_gaussian(
+    individual: 'LatentZ0Genotype',
+    mutation_strength: float = 0.05
+) -> 'LatentZ0Genotype':
+    """z_0 へのガウスノイズ付加による突然変異。"""
+    mutant = individual.clone()
+    mutant.z0 = mutant.z0 + torch.randn_like(mutant.z0) * mutation_strength
+    mutant.seed = np.random.randint(0, 2**32 - 1)
+    mutant.metadata = {
+        "parent_id": individual.id,
+        "mutation_strength": mutation_strength,
+        "operation": "mutate_z0_gaussian",
+        "prompt": individual.metadata.get("prompt", "")
+    }
+    mutant.generation = individual.generation + 1
+    return mutant
+
+
 def adaptive_mutation_rate(generation: int, convergence_score: float = 0.0) -> float:
     """
     世代数と収束状況に応じて突然変異率を動的に調整

@@ -9,7 +9,11 @@ from typing import List, Optional, Tuple, Dict
 import os
 
 from audioldm.pipeline import build_model, duration_to_latent_t_size
-from audioldm.iec import AudioGenotype, IECPopulation, TransformGenotype, crossover_matrix_uniform, mutate_transform_gaussian
+from audioldm.iec import (
+    AudioGenotype, IECPopulation,
+    TransformGenotype, crossover_matrix_uniform, mutate_transform_gaussian,
+    LatentZ0Genotype, crossover_z0_slerp, mutate_z0_gaussian,
+)
 
 
 class AudioLDM_IEC:
@@ -165,7 +169,9 @@ class AudioLDM_IEC:
         unconditional_guidance_scale: Optional[float] = None,
         ddim_eta: float = 0.0,
     ) -> np.ndarray:
-        """AudioGenotype / TransformGenotype を問わず音声を生成するディスパッチャ。"""
+        """AudioGenotype / TransformGenotype / LatentZ0Genotype を問わず音声を生成するディスパッチャ。"""
+        if isinstance(genotype, LatentZ0Genotype):
+            return self._generate_audio_from_z0_genotype(genotype)
         if isinstance(genotype, TransformGenotype):
             return self._generate_audio_from_transform_genotype(
                 genotype, text=text,
@@ -323,6 +329,192 @@ class AudioLDM_IEC:
         return list(zip(genotypes, waveforms))
 
     # ------------------------------------------------------------------
+    # z_0 GA（新モード: DDIM逆拡散で得られた潜在表現を個体とする）
+    # ------------------------------------------------------------------
+
+    def _sample_z0_batch(
+        self,
+        x_T_list: List[torch.Tensor],
+        text: str = "",
+        unconditional_guidance_scale: Optional[float] = None,
+        ddim_eta: float = 0.0,
+    ) -> List[torch.Tensor]:
+        """複数の z_T から DDIM で z_0 をバッチ生成し、z_0 テンソルのリストを返す。"""
+        if unconditional_guidance_scale is None:
+            unconditional_guidance_scale = self.guidance_scale
+        n = len(x_T_list)
+        with self.latent_diffusion.ema_scope("Z0 DDIM Sampling"):
+            with torch.no_grad():
+                if text:
+                    c_single = self.latent_diffusion.cond_stage_model([text, text])[0:1]
+                else:
+                    c_single = self.latent_diffusion.cond_stage_model([" ", " "])[0:1]
+                c = torch.cat([c_single] * n, dim=0)
+                uc = (
+                    self.latent_diffusion.cond_stage_model.get_unconditional_condition(n)
+                    if unconditional_guidance_scale != 1.0 else None
+                )
+                x_T_batch = torch.cat(x_T_list, dim=0)
+                samples, _ = self.latent_diffusion.sample_log(
+                    cond=c, batch_size=n, ddim=True,
+                    ddim_steps=self.ddim_steps, eta=ddim_eta,
+                    unconditional_guidance_scale=unconditional_guidance_scale,
+                    unconditional_conditioning=uc, x_T=x_T_batch,
+                )
+        return [samples[i:i+1] for i in range(n)]
+
+    def _decode_z0_to_audio(self, z0: torch.Tensor) -> np.ndarray:
+        """z_0 を VAE デコードして音声波形を返す（DDIM 不要）。"""
+        with self.latent_diffusion.ema_scope("Z0 Decode"):
+            with torch.no_grad():
+                if torch.max(torch.abs(z0)) > 1e2:
+                    z0 = torch.clip(z0, min=-10, max=10)
+                mel = self.latent_diffusion.decode_first_stage(z0)
+                waveform = self.latent_diffusion.mel_spectrogram_to_waveform(mel)
+        return waveform[0:1]
+
+    def _decode_z0_batch(self, z0_list: List[torch.Tensor]) -> List[np.ndarray]:
+        """複数の z_0 をバッチ VAE デコードして音声波形リストを返す。"""
+        with self.latent_diffusion.ema_scope("Z0 Batch Decode"):
+            with torch.no_grad():
+                z0_batch = torch.cat(z0_list, dim=0)
+                if torch.max(torch.abs(z0_batch)) > 1e2:
+                    z0_batch = torch.clip(z0_batch, min=-10, max=10)
+                mel = self.latent_diffusion.decode_first_stage(z0_batch)
+                waveform_batch = self.latent_diffusion.mel_spectrogram_to_waveform(mel)
+        n = len(z0_list)
+        return [waveform_batch[i:i+1] for i in range(n)]
+
+    def _generate_audio_from_z0_genotype(self, genotype: LatentZ0Genotype) -> np.ndarray:
+        """z_0 を直接 VAE デコードして音声生成（DDIM 不要）。"""
+        return self._decode_z0_to_audio(genotype.z0.to(self.device))
+
+    def initialize_population_z0(
+        self,
+        prompt: Optional[str] = None,
+    ) -> List[Tuple[LatentZ0Genotype, np.ndarray]]:
+        """
+        z_0 モードの初期個体群を生成する。
+
+        各個体: ランダム z_T → DDIM サンプリング → z_0 を個体として保持。
+        以降の子個体の評価は VAE decode のみで済む（DDIM 不要）。
+        """
+        print(f"[z0モード] 第{self.population.generation_number}世代を生成中...")
+        if prompt is None:
+            prompt = ""
+
+        x_T_list = []
+        seeds = []
+        for _ in range(self.population_size):
+            seed = np.random.randint(0, 2**32 - 1)
+            seeds.append(seed)
+            generator = torch.Generator(device=self.device).manual_seed(seed)
+            x_T = torch.randn((1,) + self.latent_shape, device=self.device, generator=generator)
+            x_T_list.append(x_T)
+
+        print(f"  DDIM サンプリングで z_0 を生成中 (個体数={self.population_size})...")
+        z0_list = self._sample_z0_batch(x_T_list, text=prompt)
+
+        genotypes = []
+        for z0, seed in zip(z0_list, seeds):
+            g = LatentZ0Genotype(
+                z0=z0,
+                seed=seed,
+                metadata={"initialization": "ddim_sampling", "prompt": prompt, "ga_mode": "z0"}
+            )
+            g.generation = self.population.generation_number
+            genotypes.append(g)
+
+        self.population.current_generation = genotypes
+        self.population.history.append([g.clone() for g in genotypes])
+
+        print(f"  VAE デコードで音声を生成中...")
+        waveforms = self._decode_z0_batch([g.z0.to(self.device) for g in genotypes])
+        return list(zip(genotypes, waveforms))
+
+    def evolve_population_z0(
+        self,
+        selected_indices: List[int],
+        mutation_strength: float = 0.15,
+        elite_count: int = 1,
+        fresh_count: int = 1,
+    ) -> List[Tuple[LatentZ0Genotype, np.ndarray]]:
+        """
+        z_0 空間での交叉・変異 → VAE デコードで音声生成。
+
+        子の評価に DDIM は不要なため、進化世代の生成が高速。
+
+        Args:
+            fresh_count: 毎世代 DDIM で完全新規生成する個体数。
+                         slerp 補間だけだと個体が選択親の重心に収束するため、
+                         fresh_count > 0 にすることで多様性を維持できる。
+        """
+        print(f"\n[z0モード] 第{self.population.generation_number + 1}世代を生成中...")
+        if not selected_indices:
+            raise ValueError("少なくとも1つの個体を選択してください")
+
+        selected = [self.population.current_generation[i] for i in selected_indices]
+        prompt = selected[0].metadata.get("prompt", "")
+
+        next_gen: List[LatentZ0Genotype] = []
+
+        # エリート保存
+        for i in range(min(elite_count, len(selected))):
+            elite = selected[i].clone()
+            elite.generation = self.population.generation_number + 1
+            elite.metadata["elite"] = True
+            next_gen.append(elite)
+
+        # DDIM 新鮮注入: slerp だけだと全子が親の「間」に収束するため、
+        # 完全ランダムな z_T から DDIM で生成した個体を混入して多様性を維持する。
+        actual_fresh = min(fresh_count, self.population_size - len(next_gen))
+        if actual_fresh > 0:
+            print(f"  DDIM 新鮮注入: {actual_fresh} 体を DDIM で新規生成中...")
+            fresh_x_T_list = []
+            fresh_seeds = []
+            for _ in range(actual_fresh):
+                seed = np.random.randint(0, 2**32 - 1)
+                fresh_seeds.append(seed)
+                generator = torch.Generator(device=self.device).manual_seed(seed)
+                x_T = torch.randn((1,) + self.latent_shape, device=self.device, generator=generator)
+                fresh_x_T_list.append(x_T)
+            fresh_z0_list = self._sample_z0_batch(fresh_x_T_list, text=prompt)
+            for z0, seed in zip(fresh_z0_list, fresh_seeds):
+                g = LatentZ0Genotype(
+                    z0=z0, seed=seed,
+                    metadata={"operation": "ddim_fresh_injection", "prompt": prompt,
+                               "ga_mode": "z0", "generation": self.population.generation_number + 1}
+                )
+                g.generation = self.population.generation_number + 1
+                next_gen.append(g)
+
+        # 交叉 + 突然変異で残りを埋める
+        while len(next_gen) < self.population_size:
+            if len(selected) == 1:
+                child = mutate_z0_gaussian(selected[0], mutation_strength)
+            else:
+                p1, p2 = np.random.choice(selected, size=2, replace=False)
+                # alpha 範囲を広げ（[0.1, 0.9]）、親の中心から離れた点も探索する
+                alpha = np.random.uniform(0.1, 0.9)
+                child = crossover_z0_slerp(p1, p2, alpha)
+                child = mutate_z0_gaussian(child, mutation_strength)
+
+            child.generation = self.population.generation_number + 1
+            child.metadata["prompt"] = prompt
+            next_gen.append(child)
+
+        self.population.generation_number += 1
+        self.population.current_generation = next_gen[:self.population_size]
+        self.population.history.append([g.clone() for g in self.population.current_generation])
+
+        # 新鮮注入個体は DDIM 済みなので VAE decode だけで済む
+        print(f"  VAE デコードで音声を生成中 (DDIM 不要)...")
+        waveforms = self._decode_z0_batch(
+            [g.z0.to(self.device) for g in self.population.current_generation]
+        )
+        return list(zip(self.population.current_generation, waveforms))
+
+    # ------------------------------------------------------------------
     # 公開 API（モードディスパッチ）
     # ------------------------------------------------------------------
 
@@ -351,6 +543,9 @@ class AudioLDM_IEC:
             return self.initialize_population_transform(
                 prompt=prompt, base_noise_seed=base_noise_seed
             )
+
+        if self.ga_mode == "z0":
+            return self.initialize_population_z0(prompt=prompt)
 
         print(f"[潜在ノイズモード] 第{self.population.generation_number}世代の個体群を生成中...")
         
@@ -417,6 +612,7 @@ class AudioLDM_IEC:
         mutation_rate: float = 0.3,
         mutation_strength: float = 0.15,
         elite_count: int = 1,
+        fresh_count: int = 1,
     ) -> List[Tuple]:
         """選択された個体から次世代を生成する（モードに応じてディスパッチ）。"""
         if self.ga_mode == "transform":
@@ -424,6 +620,14 @@ class AudioLDM_IEC:
                 selected_indices,
                 mutation_strength=mutation_strength,
                 elite_count=elite_count,
+            )
+
+        if self.ga_mode == "z0":
+            return self.evolve_population_z0(
+                selected_indices,
+                mutation_strength=mutation_strength,
+                elite_count=elite_count,
+                fresh_count=fresh_count,
             )
 
         print(f"\n[潜在ノイズモード] 第{self.population.generation_number + 1}世代を生成中...")

@@ -14,3 +14,4 @@ output/
 local/
 .devcontainer/
 paper/
+.cache/

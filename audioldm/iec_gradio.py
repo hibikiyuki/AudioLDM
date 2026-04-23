@@ -89,7 +89,8 @@ class IECInterface:
                 base_noise_seed=base_noise_seed,
             )
 
-            mode_label = "変換行列モード" if ga_mode == "transform" else "潜在ノイズモード"
+            mode_labels = {"transform": "変換行列モード", "z0": "z0潜在表現モード", "latent": "潜在ノイズモード"}
+            mode_label = mode_labels.get(ga_mode, "潜在ノイズモード")
             if effective_prompt:
                 message = f"[{mode_label}] プロンプト '{effective_prompt}' から初期個体群を生成しました"
             else:
@@ -136,6 +137,7 @@ class IECInterface:
         mutation_rate: float,
         mutation_strength: float,
         elite_count: int,
+        fresh_count: int = 1,
         progress=gr.Progress()
     ) -> Tuple[List, str, str]:
         """
@@ -157,7 +159,8 @@ class IECInterface:
                 selected_indices=selected_checkboxes,
                 mutation_rate=mutation_rate,
                 mutation_strength=mutation_strength,
-                elite_count=elite_count
+                elite_count=elite_count,
+                fresh_count=fresh_count,
             )
             
             progress(0.7, desc="音声を保存中...")
@@ -177,7 +180,8 @@ class IECInterface:
                 "generation": self.iec_system.population.generation_number,
                 "mutation_rate": mutation_rate,
                 "mutation_strength": mutation_strength,
-                "elite_count": elite_count
+                "elite_count": elite_count,
+                "fresh_count": fresh_count,
             })
             
             progress(1.0, desc="完了!")
@@ -269,7 +273,8 @@ class IECInterface:
         """
         info = self.iec_system.get_generation_info()
         
-        mode_label = "変換行列GA" if self.iec_system.ga_mode == "transform" else "潜在ノイズGA"
+        mode_labels = {"transform": "変換行列GA", "z0": "z0潜在表現GA", "latent": "潜在ノイズGA"}
+        mode_label = mode_labels.get(self.iec_system.ga_mode, "潜在ノイズGA")
         text = f"""
 ### 📊 現在の状態
 
@@ -344,10 +349,10 @@ def create_gradio_interface(
                         value=""
                     )
                     ga_mode_radio = gr.Radio(
-                        choices=["latent", "transform"],
+                        choices=["latent", "transform", "z0"],
                         value="latent",
                         label="GA モード",
-                        info="latent: 潜在ノイズを直接進化 / transform: 変換行列を進化（ノイズ変換探索）"
+                        info="latent: 潜在ノイズを直接進化 / transform: 変換行列を進化 / z0: DDIM逆拡散潜在表現を進化（子の評価が高速）"
                     )
                     variation_strength_slider = gr.Slider(
                         visible=False,
@@ -400,6 +405,14 @@ def create_gradio_interface(
                         step=1,
                         label="エリート保存数",
                         info="優秀個体をそのまま次世代に残す数"
+                    )
+                    fresh_count_slider = gr.Slider(
+                        minimum=0,
+                        maximum=3,
+                        value=1,
+                        step=1,
+                        label="DDIM 新鮮注入数 (z0モード専用)",
+                        info="毎世代 DDIM で完全ランダム生成する個体数。0 にすると多様性が低下しやすい。"
                     )
 
                 # コントロールボタン
@@ -456,10 +469,10 @@ def create_gradio_interface(
             )
             return _pack_outputs(audio_list, info, message)
 
-        def evolve_wrapper(selected_labels, mutation_rate, mutation_strength, elite_count):
+        def evolve_wrapper(selected_labels, mutation_rate, mutation_strength, elite_count, fresh_count):
             selected_indices = [int(label.split()[-1]) for label in selected_labels]
             audio_list, info, message = interface.evolve_generation(
-                selected_indices, mutation_rate, mutation_strength, elite_count
+                selected_indices, mutation_rate, mutation_strength, elite_count, fresh_count
             )
             return _pack_outputs(audio_list, info, message)
 
@@ -480,7 +493,7 @@ def create_gradio_interface(
 
         evolve_button.click(
             fn=evolve_wrapper,
-            inputs=[selection_group, mutation_rate_slider, mutation_strength_slider, elite_count_slider],
+            inputs=[selection_group, mutation_rate_slider, mutation_strength_slider, elite_count_slider, fresh_count_slider],
             outputs=audio_components + [selection_group, info_display, status_display, audio_paths_state]
         )
 

@@ -27,6 +27,9 @@ def main():
 
   # 公開リンクを生成
   python scripts/launch_iec_gradio.py --share
+
+  # キャッシュディレクトリを指定して起動（今の環境だと必須）
+  NUMBA_CACHE_DIR=/tmp/numba_cache HF_HOME=/tmp/huggingface_cache python scripts/launch_iec_gradio.py --model_name audioldm-m-full --population_size 6 --duration 2.5 --port 8080
         """
     )
     
