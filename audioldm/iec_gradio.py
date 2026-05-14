@@ -12,6 +12,7 @@ from datetime import datetime
 import json
 
 from audioldm.iec_pipeline import AudioLDM_IEC
+from audioldm.iec import StyleTransferGenotype
 
 
 class IECInterface:
@@ -43,7 +44,12 @@ class IECInterface:
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.session_dir = os.path.join(output_dir, f"session_{self.session_id}")
         os.makedirs(self.session_dir, exist_ok=True)
-        
+
+        # スタイル転送用の状態
+        self.st_results: List[Tuple] = []
+        self.st_audio_paths: List[str] = []
+        self.st_ranked_words: List[Tuple[str, float]] = []
+
         # ログ
         self.interaction_log = []
         
@@ -138,6 +144,8 @@ class IECInterface:
         mutation_strength: float,
         elite_count: int,
         fresh_count: int = 1,
+        crossover_mode: str = "z0",
+        sdedit_strength: float = 0.0,
         progress=gr.Progress()
     ) -> Tuple[List, str, str]:
         """
@@ -161,6 +169,8 @@ class IECInterface:
                 mutation_strength=mutation_strength,
                 elite_count=elite_count,
                 fresh_count=fresh_count,
+                crossover_mode=crossover_mode,
+                sdedit_strength=sdedit_strength,
             )
             
             progress(0.7, desc="音声を保存中...")
@@ -182,6 +192,8 @@ class IECInterface:
                 "mutation_strength": mutation_strength,
                 "elite_count": elite_count,
                 "fresh_count": fresh_count,
+                "crossover_mode": crossover_mode,
+                "sdedit_strength": sdedit_strength,
             })
             
             progress(1.0, desc="完了!")
@@ -272,7 +284,7 @@ class IECInterface:
         現在の世代情報を取得
         """
         info = self.iec_system.get_generation_info()
-        
+
         mode_labels = {"transform": "変換行列GA", "z0": "z0潜在表現GA", "latent": "潜在ノイズGA"}
         mode_label = mode_labels.get(self.iec_system.ga_mode, "潜在ノイズGA")
         text = f"""
@@ -285,8 +297,185 @@ class IECInterface:
 - **セッションID**: {self.session_id}
 - **インタラクション数**: {len(self.interaction_log)}
         """
-        
+
         return text.strip()
+
+    @staticmethod
+    def _get_individual_status(genotype, index: int) -> str:
+        """
+        個体の生成元情報を人間が読めるテキストで返す
+        """
+        meta = genotype.metadata
+        lines = []
+
+        op = meta.get("operation", "")
+        init = meta.get("initialization", "")
+        is_elite = meta.get("elite", False)
+
+        def _fmt_pop_idx(idx):
+            return f"個体{idx}" if idx is not None else "?"
+
+        if is_elite:
+            parent_idx = meta.get("elite_parent_pop_index")
+            src = f" (前世代の{_fmt_pop_idx(parent_idx)})" if parent_idx is not None else ""
+            lines.append(f"⭐ エリート保存{src}")
+
+        if init in ("random", "random_gaussian"):
+            lines.append("🎲 初期ランダム生成")
+        elif init == "from_prompt":
+            lines.append("📝 プロンプトから初期生成")
+        elif init == "ddim_sampling":
+            lines.append("🎲 DDIM初期生成")
+        elif op == "ddim_fresh_injection":
+            lines.append("✨ DDIM新鮮注入")
+        elif op == "crossover_then_mutate":
+            p1_idx = _fmt_pop_idx(meta.get("crossover_parent1_pop_index"))
+            p2_idx = _fmt_pop_idx(meta.get("crossover_parent2_pop_index"))
+            strength = meta.get("mutation_strength", 0)
+            ctype = meta.get("crossover_type", "slerp")
+            if ctype == "uniform":
+                cp = meta.get("crossover_p", 0.5)
+                lines.append(f"🧬 一様交叉＋突然変異")
+                lines.append(f"　親: {p1_idx} × {p2_idx}  交叉p={cp:.2f}  変異強度={strength:.3f}")
+            else:
+                alpha = meta.get("crossover_alpha", 0.5)
+                sdedit = meta.get("sdedit_strength", 0.0)
+                sdedit_tag = f"  SDEdit={sdedit:.2f}" if sdedit > 0 else ""
+                lines.append(f"🧬 SLERP交叉＋突然変異")
+                lines.append(f"　親: {p1_idx} × {p2_idx}  α={alpha:.2f}  変異強度={strength:.3f}{sdedit_tag}")
+        elif op in ("mutate_gaussian", "mutate_transform_gaussian", "mutate_z0_gaussian"):
+            parent_idx = _fmt_pop_idx(meta.get("parent_pop_index"))
+            strength = meta.get("mutation_strength", 0)
+            lines.append(f"🔀 突然変異")
+            lines.append(f"　親: {parent_idx}  強度={strength:.3f}")
+        elif op == "crossover_zt_slerp":
+            alpha = meta.get("crossover_alpha", 0.5)
+            strength = meta.get("sdedit_strength", 0.0)
+            p1_idx = _fmt_pop_idx(meta.get("crossover_parent1_pop_index"))
+            p2_idx = _fmt_pop_idx(meta.get("crossover_parent2_pop_index"))
+            lines.append(f"🧬 z_t空間交叉")
+            lines.append(f"　親: {p1_idx} × {p2_idx}  α={alpha:.2f}  ノイズ強度={strength:.2f}")
+        elif op in ("crossover_slerp", "crossover_z0_slerp"):
+            alpha = meta.get("crossover_alpha", 0.5)
+            p1_idx = _fmt_pop_idx(meta.get("crossover_parent1_pop_index"))
+            p2_idx = _fmt_pop_idx(meta.get("crossover_parent2_pop_index"))
+            lines.append(f"🧬 SLERP交叉")
+            lines.append(f"　親: {p1_idx} × {p2_idx}  α={alpha:.2f}")
+        elif op == "crossover_matrix_uniform":
+            cp = meta.get("crossover_p", 0.5)
+            p1_idx = _fmt_pop_idx(meta.get("crossover_parent1_pop_index"))
+            p2_idx = _fmt_pop_idx(meta.get("crossover_parent2_pop_index"))
+            lines.append(f"🧬 一様交叉")
+            lines.append(f"　親: {p1_idx} × {p2_idx}  p={cp:.2f}")
+
+        if isinstance(genotype, StyleTransferGenotype):
+            lines.append("🎨 スタイル転送")
+            lines.append(f"  ノイズ強度: {genotype.noise_strength:.3f}")
+            lines.append(f"  ガイダンス: {genotype.guidance_scale:.1f}")
+            lines.append(f"  マスク: [{genotype.mask_start:.2f}, {genotype.mask_end:.2f}]")
+            if is_elite:
+                lines.append("⭐ エリート")
+            return "\n".join(lines) if lines else "情報なし"
+
+        seed = getattr(genotype, "seed", None)
+        if seed is not None:
+            lines.append(f"🌱 seed={seed}")
+
+        return "\n".join(lines) if lines else "情報なし"
+
+    def initialize_style_transfer(
+        self,
+        audio_a_path: Optional[str],
+        audio_b_path: Optional[str],
+        base_prompt: str,
+        top_k: int,
+        noise_min: float,
+        noise_max: float,
+        gs_min: float,
+        gs_max: float,
+        progress=gr.Progress(),
+    ) -> Tuple[List, str, str, str]:
+        """スタイル転送の初期個体群を生成する。
+
+        Returns:
+            (audio_paths, style_words_md, info, status_message)
+        """
+        if not audio_a_path or not audio_b_path:
+            return self.st_audio_paths, "", "", "⚠️ 音声AとBの両方をアップロードしてください"
+
+        try:
+            progress(0.1, desc="スタイル語をランキング中...")
+            self.st_results, self.st_ranked_words = \
+                self.iec_system.initialize_style_transfer_population(
+                    audio_a_path=audio_a_path,
+                    audio_b_path=audio_b_path,
+                    base_prompt=base_prompt,
+                    top_k_styles=int(top_k),
+                    noise_strength_range=(noise_min, noise_max),
+                    guidance_scale_range=(gs_min, gs_max),
+                )
+            progress(0.9, desc="音声を保存中...")
+            self.st_audio_paths = self.iec_system.save_generation_audio(
+                self.st_results,
+                output_dir=self.session_dir,
+                prefix="st_gen000",
+            )
+            style_words_md = "| スタイル語 | スコア |\n|---|---|\n"
+            style_words_md += "\n".join(
+                f"| {w} | {s:.3f} |" for w, s in self.st_ranked_words)
+            info = f"**第0世代** / 個体数={len(self.st_results)} / " \
+                   f"スタイルプロンプト: _{self.st_results[0][0].style_prompt}_"
+            progress(1.0, desc="完了!")
+            return self.st_audio_paths, style_words_md, info, "✅ スタイル転送の初期個体群を生成しました"
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            return self.st_audio_paths, "", "", f"エラー: {str(e)}"
+
+    def evolve_style_transfer(
+        self,
+        selected_labels: List[str],
+        mutation_noise: float,
+        mutation_gs: float,
+        mutation_mask: float,
+        elite_count: int,
+        progress=gr.Progress(),
+    ) -> Tuple[List, str, str, str]:
+        """スタイル転送個体群を進化させる。
+
+        Returns:
+            (audio_paths, style_words_md, info, status_message)
+        """
+        if not self.st_results:
+            return [], "", "", "⚠️ 先にスタイル転送を初期化してください"
+        if not selected_labels:
+            return self.st_audio_paths, "", "", "⚠️ 少なくとも1つの個体を選択してください"
+
+        selected_indices = [int(label.split()[-1]) for label in selected_labels]
+        try:
+            progress(0.2, desc="次世代を生成中...")
+            self.st_results = self.iec_system.evolve_style_transfer_population(
+                selected_indices=selected_indices,
+                mutation_noise_sigma=mutation_noise,
+                mutation_gs_sigma=mutation_gs,
+                mutation_mask_sigma=mutation_mask,
+                elite_count=int(elite_count),
+            )
+            progress(0.9, desc="音声を保存中...")
+            gen = self.iec_system.population.generation_number
+            self.st_audio_paths = self.iec_system.save_generation_audio(
+                self.st_results, output_dir=self.session_dir,
+                prefix=f"st_gen{gen:03d}",
+            )
+            style_words_md = "| スタイル語 | スコア |\n|---|---|\n"
+            style_words_md += "\n".join(
+                f"| {w} | {s:.3f} |" for w, s in self.st_ranked_words)
+            info = f"**第{gen}世代** / 個体数={len(self.st_results)}"
+            progress(1.0, desc="完了!")
+            return self.st_audio_paths, style_words_md, info, \
+                   f"✅ 第{gen}世代を生成しました"
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            return self.st_audio_paths, "", "", f"エラー: {str(e)}"
 
 
 def create_gradio_interface(
@@ -326,216 +515,290 @@ def create_gradio_interface(
     
     with gr.Blocks(title="Demo", css=custom_css) as demo:
         gr.Markdown("""
-        <!-- 
-        # 🎵 AudioLDM-IEC: 対話型進化的効果音生成システム
-        
-        このシステムは、進化計算を用いて理想の効果音を探索します。
-        -->
         ## 使い方
         1. **初期化**: プロンプトを入力して初期個体群を生成
         2. **選択**: 気に入った音声を選択
         3. **進化**: 次世代を生成してステップ2-3を繰り返す
-        4. **保存**: 満足したらセッションを保存
         """)
-        
-        with gr.Row():
-            with gr.Column(scale=2):
-                # 初期化セクション
-                with gr.Group():
-                    gr.Markdown("### 🚀 初期化")
-                    prompt_input = gr.Textbox(
-                        label="プロンプト (空欄でランダム生成)",
-                        placeholder="",
-                        value=""
-                    )
-                    ga_mode_radio = gr.Radio(
-                        choices=["latent", "transform", "z0"],
-                        value="latent",
-                        label="GA モード",
-                        info="latent: 潜在ノイズを直接進化 / transform: 変換行列を進化 / z0: DDIM逆拡散潜在表現を進化（子の評価が高速）"
-                    )
-                    variation_strength_slider = gr.Slider(
-                        visible=False,
-                        minimum=0.0,
-                        maximum=1.0,
-                        value=0.3,
-                        step=0.05,
-                        label="初期変異強度",
-                        info="プロンプトからの変化の大きさ (潜在ノイズモード用)"
-                    )
-                    with gr.Group() as transform_init_group:
-                        transform_init_std_slider = gr.Slider(
-                            minimum=0.01,
-                            maximum=1.0,
-                            value=0.3,
-                            step=0.05,
-                            label="変換行列の初期摂動強度",
-                            info="単位行列からの初期ランダム摂動の大きさ (変換行列モード用)"
+
+        with gr.Tabs():
+
+            # ===== 通常生成タブ =====
+            with gr.Tab("通常生成"):
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        with gr.Group():
+                            gr.Markdown("### 🚀 初期化")
+                            prompt_input = gr.Textbox(
+                                label="プロンプト (空欄でランダム生成)",
+                                placeholder="",
+                                value=""
+                            )
+                            ga_mode_radio = gr.Radio(
+                                choices=["latent", "transform", "z0"],
+                                value="latent",
+                                label="GA モード",
+                                info="latent: 潜在ノイズを直接進化 / transform: 変換行列を進化 / z0: DDIM逆拡散潜在表現を進化（子の評価が高速）"
+                            )
+                            variation_strength_slider = gr.Slider(
+                                visible=False,
+                                minimum=0.0, maximum=1.0, value=0.3, step=0.05,
+                                label="初期変異強度",
+                            )
+                            with gr.Group() as transform_init_group:
+                                transform_init_std_slider = gr.Slider(
+                                    minimum=0.01, maximum=1.0, value=0.3, step=0.05,
+                                    label="変換行列の初期摂動強度",
+                                )
+                                base_noise_seed_input = gr.Textbox(
+                                    label="ベースノイズ seed (空欄でランダム)",
+                                    placeholder="例: 42", value=""
+                                )
+                            init_button = gr.Button("🎲 初期個体群を生成", variant="primary", size="lg")
+
+                        with gr.Group(visible=True):
+                            gr.Markdown("### ⚙️ 進化パラメータ")
+                            mutation_rate_slider = gr.Slider(
+                                minimum=0.0, maximum=1.0, value=0.3, step=0.05,
+                                label="突然変異率 (潜在ノイズモード用)",
+                            )
+                            mutation_strength_slider = gr.Slider(
+                                minimum=0.0, maximum=0.5, value=0.15, step=0.05,
+                                label="突然変異強度",
+                            )
+                            elite_count_slider = gr.Slider(
+                                minimum=0, maximum=3, value=1, step=1,
+                                label="エリート保存数",
+                            )
+                            fresh_count_slider = gr.Slider(
+                                minimum=0, maximum=3, value=1, step=1,
+                                label="DDIM 新鮮注入数 (z0モード専用)",
+                            )
+                            crossover_mode_radio = gr.Radio(
+                                choices=["z0", "zt"], value="z0",
+                                label="交叉モード (z0モード専用)",
+                            )
+                            sdedit_strength_slider = gr.Slider(
+                                minimum=0.0, maximum=0.5, value=0.0, step=0.05,
+                                label="SDEdit強度 (z0モード専用)",
+                            )
+
+                        with gr.Group():
+                            gr.Markdown("### 🎮 コントロール")
+                            evolve_button = gr.Button("🧬 次世代を生成", variant="primary", size="lg")
+                            with gr.Row():
+                                rollback_button = gr.Button("🔙 1世代戻る")
+                                save_button = gr.Button("💾 セッション保存")
+
+                    with gr.Column(scale=1):
+                        info_display = gr.Markdown("### 📊 情報\n準備中...")
+                        status_display = gr.Textbox(
+                            label="ステータス", value="システム準備完了", interactive=False
                         )
-                        base_noise_seed_input = gr.Textbox(
-                            label="ベースノイズ seed (空欄でランダム)",
-                            placeholder="例: 42",
-                            value=""
-                        )
-                    init_button = gr.Button("🎲 初期個体群を生成", variant="primary", size="lg")
 
-                # 進化パラメータ
-                with gr.Group(visible=True):
-                    gr.Markdown("### ⚙️ 進化パラメータ")
-                    mutation_rate_slider = gr.Slider(
-                        minimum=0.0,
-                        maximum=1.0,
-                        value=0.3,
-                        step=0.05,
-                        label="突然変異率 (潜在ノイズモード用)",
-                        info="変異が起こる確率"
-                    )
-                    mutation_strength_slider = gr.Slider(
-                        minimum=0.0,
-                        maximum=0.5,
-                        value=0.15,
-                        step=0.05,
-                        label="突然変異強度",
-                        info="変異の大きさ (両モード共通)"
-                    )
-                    elite_count_slider = gr.Slider(
-                        minimum=0,
-                        maximum=3,
-                        value=1,
-                        step=1,
-                        label="エリート保存数",
-                        info="優秀個体をそのまま次世代に残す数"
-                    )
-                    fresh_count_slider = gr.Slider(
-                        minimum=0,
-                        maximum=3,
-                        value=1,
-                        step=1,
-                        label="DDIM 新鮮注入数 (z0モード専用)",
-                        info="毎世代 DDIM で完全ランダム生成する個体数。0 にすると多様性が低下しやすい。"
-                    )
-
-                # コントロールボタン
-                with gr.Group():
-                    gr.Markdown("### 🎮 コントロール")
-                    evolve_button = gr.Button("🧬 次世代を生成", variant="primary", size="lg")
-
-                    with gr.Row():
-                        rollback_button = gr.Button("🔙 1世代戻る")
-                        save_button = gr.Button("💾 セッション保存")
-            
-            with gr.Column(scale=1):
-                # 情報表示
-                info_display = gr.Markdown("### 📊 情報\n準備中...")
-                status_display = gr.Textbox(
-                    label="ステータス",
-                    value="システム準備完了",
-                    interactive=False
+                gr.Markdown("### 🎧 個体群 (音声を聴いて選択してください)")
+                selection_group = gr.CheckboxGroup(
+                    choices=[], label="選択する個体",
+                    info="気に入った音声を選択してください(複数選択可)"
                 )
-        
-        # 音声表示エリア
-        gr.Markdown("### 🎧 個体群 (音声を聴いて選択してください)")
-        
-        # チェックボックスグループ
-        selection_group = gr.CheckboxGroup(
-            choices=[],
-            label="選択する個体",
-            info="気に入った音声を選択してください(複数選択可)"
-        )
-        
-        # 音声プレーヤー(動的に生成)
-        audio_components = []
-        with gr.Row():
-            for i in range(population_size):
-                with gr.Column():
-                    audio = gr.Audio(
-                        label=f"個体 {i}",
-                        type="filepath",
-                        interactive=False
-                    )
-                    audio_components.append(audio)
-        
-        # 状態管理
-        audio_paths_state = gr.State([])
+                audio_components = []
+                status_components = []
+                with gr.Row():
+                    for i in range(population_size):
+                        with gr.Column():
+                            audio = gr.Audio(label=f"個体 {i}", type="filepath", interactive=False)
+                            status = gr.Textbox(
+                                value="", label="生成元", interactive=False, lines=3, max_lines=4)
+                            audio_components.append(audio)
+                            status_components.append(status)
 
-        def _pack_outputs(audio_list, info, message):
-            choices = [f"個体 {i}" for i in range(len(audio_list))]
-            outputs = audio_list + [None] * (population_size - len(audio_list))
-            return outputs + [gr.CheckboxGroup(choices=choices, value=[]), info, message, audio_list]
+                audio_paths_state = gr.State([])
 
-        def init_wrapper(prompt, variation_strength, ga_mode, transform_init_std, base_noise_seed_str):
-            audio_list, info, message = interface.initialize_generation(
-                prompt, variation_strength, ga_mode, transform_init_std, base_noise_seed_str
-            )
-            return _pack_outputs(audio_list, info, message)
+                def _get_status_list():
+                    statuses = []
+                    for i in range(population_size):
+                        if i < len(interface.current_results):
+                            genotype = interface.current_results[i][0]
+                            statuses.append(IECInterface._get_individual_status(genotype, i))
+                        else:
+                            statuses.append("")
+                    return statuses
 
-        def evolve_wrapper(selected_labels, mutation_rate, mutation_strength, elite_count, fresh_count):
-            selected_indices = [int(label.split()[-1]) for label in selected_labels]
-            audio_list, info, message = interface.evolve_generation(
-                selected_indices, mutation_rate, mutation_strength, elite_count, fresh_count
-            )
-            return _pack_outputs(audio_list, info, message)
+                def _pack_outputs(audio_list, info, message):
+                    choices = [f"個体 {i}" for i in range(len(audio_list))]
+                    audio_outputs = audio_list + [None] * (population_size - len(audio_list))
+                    status_outputs = _get_status_list()
+                    return (audio_outputs
+                            + [gr.CheckboxGroup(choices=choices, value=[]), info, message, audio_list]
+                            + status_outputs)
 
-        def rollback_wrapper():
-            audio_list, info, message = interface.rollback_generation(steps=1)
-            return _pack_outputs(audio_list, info, message)
+                def init_wrapper(prompt, variation_strength, ga_mode, transform_init_std, base_noise_seed_str):
+                    audio_list, info, message = interface.initialize_generation(
+                        prompt, variation_strength, ga_mode, transform_init_std, base_noise_seed_str)
+                    return _pack_outputs(audio_list, info, message)
 
-        def save_wrapper():
-            return interface.save_session()
+                def evolve_wrapper(selected_labels, mutation_rate, mutation_strength,
+                                   elite_count, fresh_count, crossover_mode, sdedit_strength):
+                    selected_indices = [int(label.split()[-1]) for label in selected_labels]
+                    audio_list, info, message = interface.evolve_generation(
+                        selected_indices, mutation_rate, mutation_strength, elite_count, fresh_count,
+                        crossover_mode=crossover_mode, sdedit_strength=sdedit_strength)
+                    return _pack_outputs(audio_list, info, message)
 
-        # イベントの接続
-        init_button.click(
-            fn=init_wrapper,
-            inputs=[prompt_input, variation_strength_slider, ga_mode_radio,
-                    transform_init_std_slider, base_noise_seed_input],
-            outputs=audio_components + [selection_group, info_display, status_display, audio_paths_state]
-        )
+                def rollback_wrapper():
+                    audio_list, info, message = interface.rollback_generation(steps=1)
+                    return _pack_outputs(audio_list, info, message)
 
-        evolve_button.click(
-            fn=evolve_wrapper,
-            inputs=[selection_group, mutation_rate_slider, mutation_strength_slider, elite_count_slider, fresh_count_slider],
-            outputs=audio_components + [selection_group, info_display, status_display, audio_paths_state]
-        )
+                def save_wrapper():
+                    return interface.save_session()
 
-        rollback_button.click(
-            fn=rollback_wrapper,
-            inputs=[],
-            outputs=audio_components + [selection_group, info_display, status_display, audio_paths_state]
-        )
+                all_outputs = (audio_components
+                               + [selection_group, info_display, status_display, audio_paths_state]
+                               + status_components)
 
-        save_button.click(
-            fn=save_wrapper,
-            inputs=[],
-            outputs=[status_display]
-        )
-        
-        # 使用方法の説明
-        gr.Markdown("""
-        <!--
-        ---
-        ## 📖 詳細ガイド
-        
-        ### パラメータの説明
-        
-        - **初期変異強度**: プロンプトから生成される初期個体群の多様性を制御します。大きいほど多様な音が生成されます。
-        - **突然変異率**: 次世代で変異が起こる確率です。高いと探索範囲が広がりますが、収束が遅くなります。
-        - **突然変異強度**: 変異の大きさです。高いと大きく変化します。
-        - **エリート保存数**: 優秀な個体をそのまま次世代に残す数です。1-2が推奨です。
-        
-        ### Tips
-        
-        - 初期世代で多様性が低い場合は、突然変異率を上げてみてください。
-        - 良い音が見つかったら、エリート保存で確実に残しましょう。
-        - 探索が行き詰まったら、ロールバックして別の選択を試してみてください。
-        - 定期的にセッションを保存することをお勧めします。
-        
-        ### 研究計画書について
-        
-        本システムは、**主観的評価に基づく対話型進化的効果音生成**の研究プロトタイプです。
-        言語化困難な「理想の音」を、聴覚フィードバックと進化計算により探索します。
-        -->
-        """)
-    
+                init_button.click(
+                    fn=init_wrapper,
+                    inputs=[prompt_input, variation_strength_slider, ga_mode_radio,
+                            transform_init_std_slider, base_noise_seed_input],
+                    outputs=all_outputs
+                )
+                evolve_button.click(
+                    fn=evolve_wrapper,
+                    inputs=[selection_group, mutation_rate_slider, mutation_strength_slider,
+                            elite_count_slider, fresh_count_slider,
+                            crossover_mode_radio, sdedit_strength_slider],
+                    outputs=all_outputs
+                )
+                rollback_button.click(fn=rollback_wrapper, inputs=[], outputs=all_outputs)
+                save_button.click(fn=save_wrapper, inputs=[], outputs=[status_display])
+
+            # ===== スタイル変換タブ =====
+            with gr.Tab("スタイル変換"):
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        with gr.Group():
+                            gr.Markdown("### 🎵 音声入力")
+                            st_audio_a = gr.Audio(label="音声A (コンテンツ元)", type="filepath")
+                            st_audio_b = gr.Audio(label="音声B (スタイル参照)", type="filepath")
+                            st_base_prompt = gr.Textbox(
+                                label="ベースプロンプト (任意)", placeholder="例: music", value="")
+                            st_topk_slider = gr.Slider(
+                                minimum=3, maximum=10, value=5, step=1,
+                                label="スタイル語数 Top-K",
+                                info="音声Bから選出するスタイル語の数"
+                            )
+
+                        with gr.Group():
+                            gr.Markdown("### ⚙️ 初期パラメータ範囲")
+                            with gr.Row():
+                                st_noise_min = gr.Slider(0.05, 0.5, value=0.1, step=0.05,
+                                                         label="ノイズ強度 最小")
+                                st_noise_max = gr.Slider(0.05, 0.5, value=0.4, step=0.05,
+                                                         label="ノイズ強度 最大")
+                            with gr.Row():
+                                st_gs_min = gr.Slider(1.0, 15.0, value=3.0, step=0.5,
+                                                      label="ガイダンス 最小")
+                                st_gs_max = gr.Slider(1.0, 15.0, value=10.0, step=0.5,
+                                                      label="ガイダンス 最大")
+
+                        with gr.Group():
+                            gr.Markdown("### 🔀 進化パラメータ")
+                            st_mutation_noise = gr.Slider(0.0, 0.1, value=0.05, step=0.01,
+                                                          label="突然変異 ノイズ強度σ")
+                            st_mutation_gs = gr.Slider(0.0, 3.0, value=1.0, step=0.1,
+                                                       label="突然変異 ガイダンスσ")
+                            st_mutation_mask = gr.Slider(0.0, 0.1, value=0.05, step=0.01,
+                                                         label="突然変異 マスクσ")
+                            st_elite_count = gr.Slider(0, 3, value=1, step=1, label="エリート保存数")
+
+                        with gr.Group():
+                            gr.Markdown("### 🎮 コントロール")
+                            st_init_button = gr.Button(
+                                "🎨 スタイル転送を初期化", variant="primary", size="lg")
+                            st_evolve_button = gr.Button(
+                                "🧬 次世代を生成", variant="secondary", size="lg")
+
+                    with gr.Column(scale=1):
+                        st_style_words_display = gr.Markdown(
+                            "#### スタイル語 (音声Bの特徴)\n初期化後に表示されます")
+                        st_info_display = gr.Markdown("#### 情報\n準備中...")
+                        st_status_display = gr.Textbox(
+                            label="ステータス",
+                            value="音声A・Bをアップロードして初期化してください",
+                            interactive=False
+                        )
+
+                gr.Markdown("### 🎧 個体群 (スタイル変換結果)")
+                st_selection_group = gr.CheckboxGroup(
+                    choices=[], label="選択する個体",
+                    info="気に入った結果を選択してください(複数選択可)"
+                )
+                st_audio_components = []
+                st_status_components = []
+                with gr.Row():
+                    for i in range(population_size):
+                        with gr.Column():
+                            st_audio = gr.Audio(
+                                label=f"個体 {i}", type="filepath", interactive=False)
+                            st_status = gr.Textbox(
+                                value="", label="遺伝子値", interactive=False,
+                                lines=4, max_lines=5)
+                            st_audio_components.append(st_audio)
+                            st_status_components.append(st_status)
+
+                def _get_st_status_list():
+                    statuses = []
+                    for i in range(population_size):
+                        if i < len(interface.st_results):
+                            genotype = interface.st_results[i][0]
+                            statuses.append(IECInterface._get_individual_status(genotype, i))
+                        else:
+                            statuses.append("")
+                    return statuses
+
+                def _pack_st_outputs(audio_paths, style_words_md, info, message):
+                    choices = [f"個体 {i}" for i in range(len(audio_paths))]
+                    audio_outputs = audio_paths + [None] * (population_size - len(audio_paths))
+                    status_outputs = _get_st_status_list()
+                    return (audio_outputs
+                            + [gr.CheckboxGroup(choices=choices, value=[]),
+                               style_words_md, info, message]
+                            + status_outputs)
+
+                def st_init_wrapper(a_path, b_path, base_prompt, top_k,
+                                    noise_min, noise_max, gs_min, gs_max):
+                    paths, words_md, info, msg = interface.initialize_style_transfer(
+                        a_path, b_path, base_prompt, top_k,
+                        noise_min, noise_max, gs_min, gs_max)
+                    return _pack_st_outputs(paths, words_md, info, msg)
+
+                def st_evolve_wrapper(selected_labels, mutation_noise, mutation_gs,
+                                      mutation_mask, elite_count):
+                    paths, words_md, info, msg = interface.evolve_style_transfer(
+                        selected_labels, mutation_noise, mutation_gs,
+                        mutation_mask, elite_count)
+                    return _pack_st_outputs(paths, words_md, info, msg)
+
+                st_all_outputs = (st_audio_components
+                                  + [st_selection_group,
+                                     st_style_words_display,
+                                     st_info_display,
+                                     st_status_display]
+                                  + st_status_components)
+
+                st_init_button.click(
+                    fn=st_init_wrapper,
+                    inputs=[st_audio_a, st_audio_b, st_base_prompt, st_topk_slider,
+                            st_noise_min, st_noise_max, st_gs_min, st_gs_max],
+                    outputs=st_all_outputs
+                )
+                st_evolve_button.click(
+                    fn=st_evolve_wrapper,
+                    inputs=[st_selection_group, st_mutation_noise, st_mutation_gs,
+                            st_mutation_mask, st_elite_count],
+                    outputs=st_all_outputs
+                )
+
     return demo
 
 

@@ -30,6 +30,8 @@ def main():
 
   # キャッシュディレクトリを指定して起動（今の環境だと必須）
   NUMBA_CACHE_DIR=/tmp/numba_cache HF_HOME=/tmp/huggingface_cache python scripts/launch_iec_gradio.py --model_name audioldm-m-full --population_size 6 --duration 2.5 --port 8080
+
+  # Winからはhttp://192.168.100.16:8080/ にアクセス
         """
     )
     

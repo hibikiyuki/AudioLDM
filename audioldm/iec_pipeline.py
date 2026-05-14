@@ -3,16 +3,23 @@ AudioLDMとIECを統合したパイプライン
 """
 
 import torch
+import torch.nn.functional as F
 import numpy as np
 import soundfile as sf
+import torchaudio
 from typing import List, Optional, Tuple, Dict
 import os
 
 from audioldm.pipeline import build_model, duration_to_latent_t_size
+from audioldm.latent_diffusion.ddim import DDIMSampler
+from audioldm.audio import wav_to_fbank, TacotronSTFT
+from audioldm.utils import default_audioldm_config
 from audioldm.iec import (
     AudioGenotype, IECPopulation,
     TransformGenotype, crossover_matrix_uniform, mutate_transform_gaussian,
-    LatentZ0Genotype, crossover_z0_slerp, mutate_z0_gaussian,
+    LatentZ0Genotype, crossover_z0_slerp, mutate_z0_gaussian, slerp,
+    StyleTransferGenotype, crossover_style_transfer, mutate_style_transfer,
+    STYLE_WORD_BANK,
 )
 
 
@@ -28,7 +35,7 @@ class AudioLDM_IEC:
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         population_size: int = 6,
         duration: float = 5.0,
-        guidance_scale: float = 7.5, # ガイダンススケールのデフォルト値を7.5に設定
+        guidance_scale: float = 5.0, # ガイダンススケールのデフォルト値を5.0に設定
         ddim_steps: int = 200,
         n_candidate_gen_per_text: int = 3,
         ga_mode: str = "latent",
@@ -53,6 +60,8 @@ class AudioLDM_IEC:
         self.n_candidate_gen_per_text = n_candidate_gen_per_text
         self.ga_mode = ga_mode
         self._shared_base_noise: Optional[torch.Tensor] = None
+        self._fn_stft: Optional[TacotronSTFT] = None
+        self._style_transfer_sampler: Optional[DDIMSampler] = None
         
         # AudioLDMモデルのロード
         print(f"AudioLDMモデルをロード中: {model_name}")
@@ -305,15 +314,28 @@ class AudioLDM_IEC:
             elite = selected[i].clone()
             elite.generation = self.population.generation_number + 1
             elite.metadata["elite"] = True
+            elite.metadata["elite_parent_pop_index"] = selected_indices[i]
             next_gen.append(elite)
 
         while len(next_gen) < self.population_size:
             if len(selected) == 1:
                 child = mutate_transform_gaussian(selected[0], mutation_strength)
+                child.metadata["parent_pop_index"] = selected_indices[0]
             else:
-                p1, p2 = np.random.choice(selected, size=2, replace=False)
+                pair_idx = np.random.choice(len(selected), size=2, replace=False)
+                p1, p2 = selected[pair_idx[0]], selected[pair_idx[1]]
                 child = crossover_matrix_uniform(p1, p2)  # uniform crossover (論文 Sec. B.3, B.5)
+                crossover_p = child.metadata.get("crossover_p", 0.5)
                 child = mutate_transform_gaussian(child, mutation_strength)
+                child.metadata.update({
+                    "operation": "crossover_then_mutate",
+                    "crossover_type": "uniform",
+                    "crossover_parent1_pop_index": selected_indices[pair_idx[0]],
+                    "crossover_parent2_pop_index": selected_indices[pair_idx[1]],
+                    "crossover_parent1_seed": p1.seed,
+                    "crossover_parent2_seed": p2.seed,
+                    "crossover_p": crossover_p,
+                })
 
             child.generation = self.population.generation_number + 1
             child.metadata["prompt"] = prompt
@@ -389,6 +411,277 @@ class AudioLDM_IEC:
         """z_0 を直接 VAE デコードして音声生成（DDIM 不要）。"""
         return self._decode_z0_to_audio(genotype.z0.to(self.device))
 
+    def _sdedit_refine_z0_batch(
+        self,
+        z0_list: List[torch.Tensor],
+        text: str = "",
+        noise_strength: float = 0.2,
+        unconditional_guidance_scale: Optional[float] = None,
+    ) -> List[torch.Tensor]:
+        """方針A: z0 → z_t（順拡散）→ z0_refined（DDIM逆拡散）。
+
+        交叉で得られたz0を拡散モデルの多様体へ投影して音質を改善する。
+        noise_strength が大きいほど多様体への投影が強いが親の特徴が薄れる。
+        """
+        if unconditional_guidance_scale is None:
+            unconditional_guidance_scale = self.guidance_scale
+        n = len(z0_list)
+        noise_steps = max(1, int(noise_strength * self.ddim_steps))
+
+        with self.latent_diffusion.ema_scope("SDEdit Refine"):
+            with torch.no_grad():
+                sampler = DDIMSampler(self.latent_diffusion)
+                sampler.make_schedule(ddim_num_steps=self.ddim_steps, ddim_eta=0.0, verbose=False)
+
+                if text:
+                    c_single = self.latent_diffusion.cond_stage_model([text, text])[0:1]
+                else:
+                    c_single = self.latent_diffusion.cond_stage_model([" ", " "])[0:1]
+                c = torch.cat([c_single] * n, dim=0)
+                uc = (
+                    self.latent_diffusion.cond_stage_model.get_unconditional_condition(n)
+                    if unconditional_guidance_scale != 1.0 else None
+                )
+
+                z0_batch = torch.cat(z0_list, dim=0)
+                t = torch.full((n,), noise_steps - 1, dtype=torch.long, device=self.device)
+
+                z_t_batch = sampler.stochastic_encode(z0_batch, t)
+                z0_refined_batch = sampler.decode(
+                    z_t_batch, c, t_start=noise_steps,
+                    unconditional_guidance_scale=unconditional_guidance_scale,
+                    unconditional_conditioning=uc,
+                )
+        return [z0_refined_batch[i:i+1] for i in range(n)]
+
+    # ------------------------------------------------------------------
+    # スタイル転送ヘルパー
+    # ------------------------------------------------------------------
+
+    def _get_stft_instance(self) -> TacotronSTFT:
+        """TacotronSTFT インスタンスを遅延生成してキャッシュする。"""
+        if self._fn_stft is None:
+            config = default_audioldm_config()
+            pp = config["preprocessing"]
+            self._fn_stft = TacotronSTFT(
+                pp["stft"]["filter_length"],
+                pp["stft"]["hop_length"],
+                pp["stft"]["win_length"],
+                pp["mel"]["n_mel_channels"],
+                pp["audio"]["sampling_rate"],
+                pp["mel"]["mel_fmin"],
+                pp["mel"]["mel_fmax"],
+            )
+        return self._fn_stft
+
+    def _get_style_transfer_sampler(self) -> DDIMSampler:
+        """SDEdit 用 DDIMSampler をキャッシュして返す。"""
+        if self._style_transfer_sampler is None:
+            sampler = DDIMSampler(self.latent_diffusion)
+            sampler.make_schedule(
+                ddim_num_steps=self.ddim_steps, ddim_eta=0.0, verbose=False)
+            self._style_transfer_sampler = sampler
+        return self._style_transfer_sampler
+
+    def _load_waveform_for_clap(self, audio_path: str) -> torch.Tensor:
+        """WAV ファイルを 16kHz モノラルに読み込み (bs=1, t_samples) テンソルを返す。
+
+        CLAP forward() は (bs, t) を期待する (_random_mute コメント参照)。
+        batch_to_list 後に (t,) の 1D テンソルになり get_audio_features に渡る。
+        """
+        waveform, sr = torchaudio.load(audio_path)
+        if sr != 16000:
+            waveform = torchaudio.functional.resample(waveform, sr, 16000)
+        if waveform.shape[0] > 1:
+            waveform = waveform.mean(0, keepdim=True)
+        waveform = waveform / (waveform.abs().max() + 1e-8) * 0.5
+        return waveform.float()  # (1, t)
+
+    def encode_audio_to_z0(self, audio_path: str) -> torch.Tensor:
+        """WAV ファイルを mel 変換 → VAE エンコードして z0 潜在表現を返す。
+
+        pipeline.style_transfer() の lines 204-213 と同じパターン。
+        Returns:
+            z0: shape (1, C, T, F) on self.device
+        """
+        fn_stft = self._get_stft_instance()
+        mel, _, _ = wav_to_fbank(
+            audio_path,
+            target_length=int(self.duration * 102.4),
+            fn_STFT=fn_stft,
+        )
+        mel = mel.unsqueeze(0).unsqueeze(0).to(self.device)
+        with self.latent_diffusion.ema_scope("Encode Audio"):
+            with torch.no_grad():
+                z0 = self.latent_diffusion.get_first_stage_encoding(
+                    self.latent_diffusion.encode_first_stage(mel)
+                )
+        if torch.max(torch.abs(z0)) > 1e2:
+            z0 = torch.clip(z0, -10, 10)
+        return z0.detach()
+
+    def rank_style_words(
+        self,
+        audio_path: str,
+        style_words: Optional[List[str]] = None,
+        top_k: int = 5,
+    ) -> List[Tuple[str, float]]:
+        """音声Bに対する CLAP コサイン類似度でスタイル語を降順にランキングする。
+
+        Returns:
+            [(word, score), ...] 長さ top_k のリスト（降順ソート済み）
+        """
+        words = style_words if style_words is not None else STYLE_WORD_BANK
+        waveform = self._load_waveform_for_clap(audio_path).to(self.device)
+
+        cond = self.latent_diffusion.cond_stage_model
+        orig_prob = cond.unconditional_prob
+        cond.unconditional_prob = 0.0
+        try:
+            with torch.no_grad():
+                cond.embed_mode = "audio"
+                audio_emb = cond(waveform).squeeze(1)  # (1, 512)
+                cond.embed_mode = "text"
+                text_emb = cond(words).squeeze(1)      # (N, 512)
+                sims = F.cosine_similarity(
+                    audio_emb.expand(len(words), -1), text_emb, dim=1
+                )
+        finally:
+            cond.embed_mode = "text"
+            cond.unconditional_prob = orig_prob
+
+        ranked = sorted(zip(words, sims.cpu().tolist()), key=lambda x: -x[1])
+        return ranked[:top_k]
+
+    def build_style_prompt(
+        self,
+        base_prompt: str,
+        ranked_words: List[Tuple[str, float]],
+    ) -> str:
+        """ベースプロンプト + スタイル語を結合して合成プロンプトを生成する。"""
+        words_str = ", ".join(w for w, _ in ranked_words)
+        if base_prompt.strip():
+            return f"{base_prompt.strip()}, {words_str}"
+        return words_str
+
+    def _sdedit_single(
+        self,
+        sampler: DDIMSampler,
+        z0: torch.Tensor,
+        style_prompt: str,
+        noise_steps: int,
+        guidance_scale: float,
+    ) -> torch.Tensor:
+        """z0 に noise_steps 分の順拡散を加え、style_prompt で逆拡散する (SDEdit)。"""
+        t = torch.full((1,), noise_steps - 1, dtype=torch.long, device=self.device)
+        c_single = self.latent_diffusion.cond_stage_model([style_prompt, style_prompt])[0:1]
+        uc = (
+            self.latent_diffusion.cond_stage_model.get_unconditional_condition(1)
+            if guidance_scale != 1.0 else None
+        )
+        z_t = sampler.stochastic_encode(z0, t)
+        z0_out = sampler.decode(
+            z_t, c_single, t_start=noise_steps,
+            unconditional_guidance_scale=guidance_scale,
+            unconditional_conditioning=uc,
+        )
+        return z0_out
+
+    def generate_style_transfer_audio_batch(
+        self,
+        genotypes: List[StyleTransferGenotype],
+    ) -> List[np.ndarray]:
+        """StyleTransferGenotype のリストから SDEdit で音声を生成する。
+
+        各個体の noise_strength / guidance_scale / seed / mask_start / mask_end を尊重して
+        per-individual に SDEdit を実行する。
+        """
+        sampler = self._get_style_transfer_sampler()
+        waveforms = []
+
+        with self.latent_diffusion.ema_scope("StyleTransfer Generation"):
+            with torch.no_grad():
+                for g in genotypes:
+                    torch.manual_seed(g.seed)
+                    if torch.cuda.is_available():
+                        torch.cuda.manual_seed(g.seed)
+
+                    noise_steps = max(1, int(g.noise_strength * self.ddim_steps))
+                    z0 = g.z0_content.to(self.device)
+                    T = z0.shape[2]
+
+                    if g.mask_start > 0.0 or g.mask_end < 1.0:
+                        ts = int(g.mask_start * T)
+                        te = max(ts + 1, int(g.mask_end * T))
+                        z0_slice = z0[:, :, ts:te, :]
+                        slice_T = z0_slice.shape[2]
+                        pad_factor = 16
+                        pad_to = ((slice_T + pad_factor - 1) // pad_factor) * pad_factor
+                        if pad_to != slice_T:
+                            z0_slice = F.pad(z0_slice, (0, 0, 0, pad_to - slice_T))
+                        z0_slice_refined = self._sdedit_single(
+                            sampler, z0_slice, g.style_prompt, noise_steps, g.guidance_scale)
+                        z0_slice_refined = z0_slice_refined[:, :, :slice_T, :]
+                        z0_out = z0.clone()
+                        z0_out[:, :, ts:te, :] = z0_slice_refined
+                    else:
+                        z0_out = self._sdedit_single(
+                            sampler, z0, g.style_prompt, noise_steps, g.guidance_scale)
+
+                    waveforms.append(self._decode_z0_to_audio(z0_out))
+
+        return waveforms
+
+    def _crossover_z0_via_zt_batch(
+        self,
+        parent_pairs: List[Tuple[torch.Tensor, torch.Tensor]],
+        alphas: List[float],
+        text: str = "",
+        noise_strength: float = 0.2,
+        unconditional_guidance_scale: Optional[float] = None,
+    ) -> List[torch.Tensor]:
+        """方針B: 両親を同一ノイズでz_t空間へ変換 → SLERP → DDIM逆拡散。
+
+        同一ノイズを使うことで z_t = sqrt(α)*z0 + sqrt(1-α)*ε の z0 部分だけが
+        異なる状態を作り、z_t 空間での SLERP が有意義になる。
+        """
+        if unconditional_guidance_scale is None:
+            unconditional_guidance_scale = self.guidance_scale
+        n = len(parent_pairs)
+        noise_steps = max(1, int(noise_strength * self.ddim_steps))
+
+        with self.latent_diffusion.ema_scope("ZT Crossover"):
+            with torch.no_grad():
+                sampler = DDIMSampler(self.latent_diffusion)
+                sampler.make_schedule(ddim_num_steps=self.ddim_steps, ddim_eta=0.0, verbose=False)
+
+                if text:
+                    c_single = self.latent_diffusion.cond_stage_model([text, text])[0:1]
+                else:
+                    c_single = self.latent_diffusion.cond_stage_model([" ", " "])[0:1]
+                c = torch.cat([c_single] * n, dim=0)
+                uc = (
+                    self.latent_diffusion.cond_stage_model.get_unconditional_condition(n)
+                    if unconditional_guidance_scale != 1.0 else None
+                )
+
+                z_t_children = []
+                t = torch.full((1,), noise_steps - 1, dtype=torch.long, device=self.device)
+                for (z0_p1, z0_p2), alpha in zip(parent_pairs, alphas):
+                    noise = torch.randn_like(z0_p1)
+                    z_t_p1 = sampler.stochastic_encode(z0_p1, t, noise=noise)
+                    z_t_p2 = sampler.stochastic_encode(z0_p2, t, noise=noise)
+                    z_t_child = slerp(z_t_p1, z_t_p2, alpha)
+                    z_t_children.append(z_t_child)
+
+                z_t_batch = torch.cat(z_t_children, dim=0)
+                z0_batch = sampler.decode(
+                    z_t_batch, c, t_start=noise_steps,
+                    unconditional_guidance_scale=unconditional_guidance_scale,
+                    unconditional_conditioning=uc,
+                )
+        return [z0_batch[i:i+1] for i in range(n)]
+
     def initialize_population_z0(
         self,
         prompt: Optional[str] = None,
@@ -438,16 +731,19 @@ class AudioLDM_IEC:
         mutation_strength: float = 0.15,
         elite_count: int = 1,
         fresh_count: int = 1,
+        crossover_mode: str = "z0",
+        sdedit_strength: float = 0.0,
     ) -> List[Tuple[LatentZ0Genotype, np.ndarray]]:
         """
         z_0 空間での交叉・変異 → VAE デコードで音声生成。
 
-        子の評価に DDIM は不要なため、進化世代の生成が高速。
-
         Args:
+            crossover_mode: "z0" = z0空間でSLERP後にオプションでSDEdit（方針A）、
+                            "zt" = z_t空間でSLERP→逆拡散（方針B）。
+            sdedit_strength: 0.0 = 無効。>0 のとき:
+                             方針A: 交叉後z0にSDEditを適用するノイズ量 (ddim_stepsの割合)。
+                             方針B: z_t空間交叉のノイズ量。
             fresh_count: 毎世代 DDIM で完全新規生成する個体数。
-                         slerp 補間だけだと個体が選択親の重心に収束するため、
-                         fresh_count > 0 にすることで多様性を維持できる。
         """
         print(f"\n[z0モード] 第{self.population.generation_number + 1}世代を生成中...")
         if not selected_indices:
@@ -463,6 +759,7 @@ class AudioLDM_IEC:
             elite = selected[i].clone()
             elite.generation = self.population.generation_number + 1
             elite.metadata["elite"] = True
+            elite.metadata["elite_parent_pop_index"] = selected_indices[i]
             next_gen.append(elite)
 
         # DDIM 新鮮注入: slerp だけだと全子が親の「間」に収束するため、
@@ -489,26 +786,87 @@ class AudioLDM_IEC:
                 next_gen.append(g)
 
         # 交叉 + 突然変異で残りを埋める
-        while len(next_gen) < self.population_size:
-            if len(selected) == 1:
-                child = mutate_z0_gaussian(selected[0], mutation_strength)
-            else:
-                p1, p2 = np.random.choice(selected, size=2, replace=False)
-                # alpha 範囲を広げ（[0.1, 0.9]）、親の中心から離れた点も探索する
+        if crossover_mode == "zt" and len(selected) >= 2 and sdedit_strength > 0:
+            # 方針B: z_t空間での交叉（ペアを先にまとめてバッチ逆拡散）
+            print(f"  方針B: z_t空間交叉 (noise_strength={sdedit_strength})...")
+            pairs: List[Tuple[torch.Tensor, torch.Tensor]] = []
+            alphas_list: List[float] = []
+            pair_meta: List[dict] = []
+            while len(next_gen) + len(pairs) < self.population_size:
+                pair_idx = np.random.choice(len(selected), size=2, replace=False)
+                p1, p2 = selected[pair_idx[0]], selected[pair_idx[1]]
                 alpha = np.random.uniform(0.1, 0.9)
-                child = crossover_z0_slerp(p1, p2, alpha)
-                child = mutate_z0_gaussian(child, mutation_strength)
+                pairs.append((p1.z0.to(self.device), p2.z0.to(self.device)))
+                alphas_list.append(alpha)
+                pair_meta.append({
+                    "operation": "crossover_zt_slerp",
+                    "crossover_mode": "zt",
+                    "crossover_type": "zt_slerp",
+                    "crossover_parent1_pop_index": selected_indices[pair_idx[0]],
+                    "crossover_parent2_pop_index": selected_indices[pair_idx[1]],
+                    "crossover_parent1_seed": p1.seed,
+                    "crossover_parent2_seed": p2.seed,
+                    "crossover_alpha": alpha,
+                    "sdedit_strength": sdedit_strength,
+                    "prompt": prompt,
+                })
+            z0_children = self._crossover_z0_via_zt_batch(
+                pairs, alphas_list, text=prompt, noise_strength=sdedit_strength
+            )
+            for z0_child, meta in zip(z0_children, pair_meta):
+                child = LatentZ0Genotype(
+                    z0=z0_child,
+                    seed=np.random.randint(0, 2**32 - 1),
+                    metadata=meta,
+                )
+                child.generation = self.population.generation_number + 1
+                next_gen.append(child)
+        else:
+            # 方針A: z0空間でSLERP交叉（既存ロジック）
+            while len(next_gen) < self.population_size:
+                if len(selected) == 1:
+                    child = mutate_z0_gaussian(selected[0], mutation_strength)
+                    child.metadata["parent_pop_index"] = selected_indices[0]
+                else:
+                    pair_idx = np.random.choice(len(selected), size=2, replace=False)
+                    p1, p2 = selected[pair_idx[0]], selected[pair_idx[1]]
+                    alpha = np.random.uniform(0.1, 0.9)
+                    child = crossover_z0_slerp(p1, p2, alpha)
+                    child = mutate_z0_gaussian(child, mutation_strength)
+                    child.metadata.update({
+                        "operation": "crossover_then_mutate",
+                        "crossover_type": "slerp",
+                        "crossover_parent1_pop_index": selected_indices[pair_idx[0]],
+                        "crossover_parent2_pop_index": selected_indices[pair_idx[1]],
+                        "crossover_parent1_seed": p1.seed,
+                        "crossover_parent2_seed": p2.seed,
+                        "crossover_alpha": alpha,
+                    })
+                child.generation = self.population.generation_number + 1
+                child.metadata["prompt"] = prompt
+                next_gen.append(child)
 
-            child.generation = self.population.generation_number + 1
-            child.metadata["prompt"] = prompt
-            next_gen.append(child)
+            # 方針A: SDEdit後処理（sdedit_strength > 0 のとき交叉子を精製）
+            if sdedit_strength > 0:
+                crossover_children = [
+                    g for g in next_gen
+                    if g.metadata.get("operation") == "crossover_then_mutate"
+                ]
+                if crossover_children:
+                    print(f"  方針A: SDEdit精製中 (strength={sdedit_strength}, {len(crossover_children)}体)...")
+                    refined_list = self._sdedit_refine_z0_batch(
+                        [g.z0.to(self.device) for g in crossover_children],
+                        text=prompt, noise_strength=sdedit_strength,
+                    )
+                    for g, z0_refined in zip(crossover_children, refined_list):
+                        g.z0 = z0_refined
+                        g.metadata["sdedit_strength"] = sdedit_strength
 
         self.population.generation_number += 1
         self.population.current_generation = next_gen[:self.population_size]
         self.population.history.append([g.clone() for g in self.population.current_generation])
 
-        # 新鮮注入個体は DDIM 済みなので VAE decode だけで済む
-        print(f"  VAE デコードで音声を生成中 (DDIM 不要)...")
+        print(f"  VAE デコードで音声を生成中...")
         waveforms = self._decode_z0_batch(
             [g.z0.to(self.device) for g in self.population.current_generation]
         )
@@ -613,6 +971,8 @@ class AudioLDM_IEC:
         mutation_strength: float = 0.15,
         elite_count: int = 1,
         fresh_count: int = 1,
+        crossover_mode: str = "z0",
+        sdedit_strength: float = 0.0,
     ) -> List[Tuple]:
         """選択された個体から次世代を生成する（モードに応じてディスパッチ）。"""
         if self.ga_mode == "transform":
@@ -628,6 +988,8 @@ class AudioLDM_IEC:
                 mutation_strength=mutation_strength,
                 elite_count=elite_count,
                 fresh_count=fresh_count,
+                crossover_mode=crossover_mode,
+                sdedit_strength=sdedit_strength,
             )
 
         print(f"\n[潜在ノイズモード] 第{self.population.generation_number + 1}世代を生成中...")
@@ -647,17 +1009,31 @@ class AudioLDM_IEC:
             elite = selected[i].clone()
             elite.generation = self.population.generation_number + 1
             elite.metadata["elite"] = True
+            elite.metadata["elite_parent_pop_index"] = selected_indices[i]
             next_generation.append(elite)
 
         while len(next_generation) < self.population_size:
             if len(selected) == 1:
                 child = mutate_gaussian(selected[0], mutation_rate, mutation_strength)
+                child.metadata["parent_pop_index"] = selected_indices[0]
             else:
-                parent1, parent2 = np.random.choice(selected, size=2, replace=False)
+                pair_idx = np.random.choice(len(selected), size=2, replace=False)
+                parent1, parent2 = selected[pair_idx[0]], selected[pair_idx[1]]
                 alpha = np.random.uniform(0.3, 0.7)
                 child = crossover_slerp(parent1, parent2, alpha)
+                child.metadata["crossover_parent1_pop_index"] = selected_indices[pair_idx[0]]
+                child.metadata["crossover_parent2_pop_index"] = selected_indices[pair_idx[1]]
                 if np.random.random() < mutation_rate:
                     child = mutate_gaussian(child, 1.0, mutation_strength)
+                    child.metadata.update({
+                        "operation": "crossover_then_mutate",
+                        "crossover_type": "slerp",
+                        "crossover_parent1_pop_index": selected_indices[pair_idx[0]],
+                        "crossover_parent2_pop_index": selected_indices[pair_idx[1]],
+                        "crossover_parent1_seed": parent1.seed,
+                        "crossover_parent2_seed": parent2.seed,
+                        "crossover_alpha": alpha,
+                    })
 
             child.generation = self.population.generation_number + 1
             child.metadata["prompt"] = prompt
@@ -716,6 +1092,123 @@ class AudioLDM_IEC:
         print(f"音声を保存しました: {output_dir}")
         return saved_paths
     
+    # ------------------------------------------------------------------
+    # スタイル転送 公開 API
+    # ------------------------------------------------------------------
+
+    def initialize_style_transfer_population(
+        self,
+        audio_a_path: str,
+        audio_b_path: str,
+        base_prompt: str = "",
+        top_k_styles: int = 5,
+        population_size: Optional[int] = None,
+        noise_strength_range: Tuple[float, float] = (0.1, 0.4),
+        guidance_scale_range: Tuple[float, float] = (3.0, 10.0),
+        z0_content: Optional[torch.Tensor] = None,
+        style_words_override: Optional[List[str]] = None,
+    ) -> Tuple[List[Tuple[StyleTransferGenotype, np.ndarray]], List[Tuple[str, float]]]:
+        """スタイル転送の初期個体群を生成する。
+
+        1. 音声Aを VAE エンコードして z0_content を取得
+        2. 音声Bの CLAP スコアでスタイル語をランキング
+        3. 合成プロンプトを構築
+        4. noise_strength / guidance_scale を等間隔サンプリングして個体群を初期化
+        5. SDEdit で全個体の音声を生成
+
+        Returns:
+            (results, ranked_words):
+                results: List[(genotype, waveform)]
+                ranked_words: [(word, score), ...] — UI 表示用
+        """
+        pop_size = population_size or self.population_size
+
+        print("音声Aをエンコード中...")
+        if z0_content is None:
+            z0_content = self.encode_audio_to_z0(audio_a_path)
+
+        print("音声Bのスタイル語をCLAPでランキング中...")
+        ranked_words = self.rank_style_words(
+            audio_b_path, style_words=style_words_override, top_k=top_k_styles)
+        style_prompt = self.build_style_prompt(base_prompt, ranked_words)
+        print(f"スタイルプロンプト: {style_prompt}")
+
+        ns_vals = np.linspace(noise_strength_range[0], noise_strength_range[1], pop_size)
+        gs_vals = np.linspace(guidance_scale_range[0], guidance_scale_range[1], pop_size)
+        np.random.shuffle(gs_vals)
+
+        genotypes = []
+        for i in range(pop_size):
+            g = StyleTransferGenotype(
+                z0_content=z0_content,
+                style_prompt=style_prompt,
+                noise_strength=float(ns_vals[i]),
+                guidance_scale=float(gs_vals[i]),
+                seed=int(np.random.randint(0, 2**32 - 1)),
+                mask_start=0.0,
+                mask_end=1.0,
+                metadata={"prompt": style_prompt, "initialization": "style_transfer"},
+            )
+            genotypes.append(g)
+
+        self.population.current_generation = genotypes
+        self.population.generation_number = 0
+        self.population.history = [list(genotypes)]
+
+        print(f"スタイル転送音声を生成中 (個体数={pop_size})...")
+        waveforms = self.generate_style_transfer_audio_batch(genotypes)
+        results = list(zip(genotypes, waveforms))
+        return results, ranked_words
+
+    def evolve_style_transfer_population(
+        self,
+        selected_indices: List[int],
+        mutation_noise_sigma: float = 0.05,
+        mutation_gs_sigma: float = 1.0,
+        mutation_mask_sigma: float = 0.05,
+        elite_count: int = 1,
+    ) -> List[Tuple[StyleTransferGenotype, np.ndarray]]:
+        """スタイル転送個体群を進化させる。
+
+        選択個体から crossover_style_transfer + mutate_style_transfer で次世代を生成。
+        """
+        current = self.population.current_generation
+        if not selected_indices:
+            selected_indices = list(range(min(2, len(current))))
+
+        parents = [current[i] for i in selected_indices if i < len(current)]
+        if not parents:
+            parents = [current[0]]
+
+        next_gen: List[StyleTransferGenotype] = []
+
+        for i in range(min(elite_count, len(parents))):
+            elite = parents[i].clone()
+            elite.metadata["elite"] = True
+            next_gen.append(elite)
+
+        while len(next_gen) < self.population_size:
+            if len(parents) == 1:
+                child = mutate_style_transfer(
+                    parents[0], noise_sigma=mutation_noise_sigma,
+                    gs_sigma=mutation_gs_sigma, mask_sigma=mutation_mask_sigma)
+            else:
+                p1, p2 = parents[np.random.randint(len(parents))], \
+                          parents[np.random.randint(len(parents))]
+                child = crossover_style_transfer(p1, p2)
+                child = mutate_style_transfer(
+                    child, noise_sigma=mutation_noise_sigma,
+                    gs_sigma=mutation_gs_sigma, mask_sigma=mutation_mask_sigma)
+            next_gen.append(child)
+
+        next_gen = next_gen[:self.population_size]
+        self.population.generation_number += 1
+        self.population.current_generation = next_gen
+        self.population.history.append(list(next_gen))
+
+        waveforms = self.generate_style_transfer_audio_batch(next_gen)
+        return list(zip(next_gen, waveforms))
+
     def get_generation_info(self) -> Dict:
         """
         現在の世代情報を取得

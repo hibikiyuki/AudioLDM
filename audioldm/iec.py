@@ -497,6 +497,8 @@ def crossover_matrix_uniform(
         metadata={
             "parent1_id": parent1.id,
             "parent2_id": parent2.id,
+            "parent1_seed": parent1.seed,
+            "parent2_seed": parent2.seed,
             "crossover_p": p,
             "operation": "crossover_matrix_uniform",
             "prompt": parent1.metadata.get("prompt", "")
@@ -519,6 +521,7 @@ def mutate_transform_gaussian(
     mutant.seed = np.random.randint(0, 2**32 - 1)
     mutant.metadata = {
         "parent_id": individual.id,
+        "parent_seed": individual.seed,
         "mutation_strength": mutation_strength,
         "operation": "mutate_transform_gaussian",
         "prompt": individual.metadata.get("prompt", "")
@@ -581,6 +584,8 @@ def crossover_z0_slerp(
         metadata={
             "parent1_id": parent1.id,
             "parent2_id": parent2.id,
+            "parent1_seed": parent1.seed,
+            "parent2_seed": parent2.seed,
             "crossover_alpha": alpha,
             "operation": "crossover_z0_slerp",
             "prompt": parent1.metadata.get("prompt", "")
@@ -600,9 +605,153 @@ def mutate_z0_gaussian(
     mutant.seed = np.random.randint(0, 2**32 - 1)
     mutant.metadata = {
         "parent_id": individual.id,
+        "parent_seed": individual.seed,
         "mutation_strength": mutation_strength,
         "operation": "mutate_z0_gaussian",
         "prompt": individual.metadata.get("prompt", "")
+    }
+    mutant.generation = individual.generation + 1
+    return mutant
+
+
+STYLE_WORD_BANK: List[str] = [
+    # テンポ・リズム
+    "fast tempo", "slow tempo", "driving rhythm", "syncopated rhythm",
+    "steady beat", "staccato", "legato",
+    # ジャンル
+    "jazz", "classical", "electronic", "ambient", "orchestral",
+    "blues", "rock", "hip hop", "folk", "pop",
+    # ムード
+    "energetic", "calm", "melancholic", "upbeat", "dark",
+    "mysterious", "playful", "tense", "romantic", "triumphant",
+    # 楽器
+    "guitar", "piano", "drums", "strings", "synthesizer",
+    "bass", "violin", "brass", "flute", "choir",
+    # テクスチャ・制作
+    "dense", "sparse", "layered", "reverb-heavy", "acoustic",
+    "cinematic", "lo-fi", "distorted", "clean", "warm",
+    # その他
+    "percussive", "melodic", "harmonic", "minimalist",
+    "complex arrangement", "solo", "ensemble",
+]
+
+
+class StyleTransferGenotype:
+    """
+    スタイル転送遺伝子型。音声Aのコンテンツ(z0_content)に音声Bのスタイルを適用する。
+
+    固定フィールド（進化しない）:
+        z0_content: 音声Aの潜在表現。全個体で共有参照（読み取りのみ）。
+        style_prompt: CLAPで選出したスタイル語を加えた合成プロンプト。
+
+    遺伝子（進化するスカラー）:
+        noise_strength: SDEditのノイズ強度 [0.05, 0.5]
+        guidance_scale: CFGガイダンス強度 [1.0, 15.0]
+        seed: 乱数シード
+        mask_start: z0の時間マスク開始位置 [0.0, 1.0]
+        mask_end: z0の時間マスク終了位置 [0.0, 1.0]  (mask_end > mask_start + 0.05)
+    """
+
+    def __init__(
+        self,
+        z0_content: torch.Tensor,
+        style_prompt: str,
+        noise_strength: float,
+        guidance_scale: float,
+        seed: int,
+        mask_start: float = 0.0,
+        mask_end: float = 1.0,
+        metadata: Optional[Dict] = None,
+    ):
+        self.z0_content = z0_content
+        self.style_prompt = style_prompt
+        self.noise_strength = float(np.clip(noise_strength, 0.05, 0.5))
+        self.guidance_scale = float(np.clip(guidance_scale, 1.0, 15.0))
+        self.seed = int(seed)
+        self.mask_start = float(np.clip(mask_start, 0.0, 1.0))
+        self.mask_end = float(np.clip(mask_end, 0.0, 1.0))
+        self._enforce_mask_validity()
+        self.fitness: float = 0.0
+        self.generation: int = 0
+        self.id: str = self._generate_id()
+        self.metadata: Dict = metadata if metadata is not None else {}
+
+    def _enforce_mask_validity(self):
+        if self.mask_end <= self.mask_start + 0.05:
+            self.mask_end = min(1.0, self.mask_start + 0.1)
+            if self.mask_end > 1.0:
+                self.mask_start = max(0.0, 1.0 - 0.1)
+                self.mask_end = 1.0
+
+    def _generate_id(self) -> str:
+        return f"styletransfer_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+
+    def clone(self) -> 'StyleTransferGenotype':
+        cloned = StyleTransferGenotype(
+            z0_content=self.z0_content,
+            style_prompt=self.style_prompt,
+            noise_strength=self.noise_strength,
+            guidance_scale=self.guidance_scale,
+            seed=self.seed,
+            mask_start=self.mask_start,
+            mask_end=self.mask_end,
+            metadata=dict(self.metadata),
+        )
+        cloned.fitness = self.fitness
+        cloned.generation = self.generation
+        return cloned
+
+
+def crossover_style_transfer(
+    parent1: 'StyleTransferGenotype',
+    parent2: 'StyleTransferGenotype',
+) -> 'StyleTransferGenotype':
+    """float遺伝子の平均値 + 微小ガウスノイズによる交叉。"""
+    ns = (parent1.noise_strength + parent2.noise_strength) / 2.0 + np.random.normal(0, 0.02)
+    gs = (parent1.guidance_scale + parent2.guidance_scale) / 2.0 + np.random.normal(0, 0.02)
+    ms = (parent1.mask_start + parent2.mask_start) / 2.0 + np.random.normal(0, 0.02)
+    me = (parent1.mask_end + parent2.mask_end) / 2.0 + np.random.normal(0, 0.02)
+    child = StyleTransferGenotype(
+        z0_content=parent1.z0_content,
+        style_prompt=parent1.style_prompt,
+        noise_strength=ns,
+        guidance_scale=gs,
+        seed=int(np.random.randint(0, 2**32 - 1)),
+        mask_start=ms,
+        mask_end=me,
+        metadata={
+            "parent1_id": parent1.id,
+            "parent2_id": parent2.id,
+            "operation": "crossover_style_transfer",
+        },
+    )
+    child.generation = max(parent1.generation, parent2.generation) + 1
+    return child
+
+
+def mutate_style_transfer(
+    individual: 'StyleTransferGenotype',
+    noise_sigma: float = 0.05,
+    gs_sigma: float = 1.0,
+    mask_sigma: float = 0.05,
+) -> 'StyleTransferGenotype':
+    """各float遺伝子への独立ガウスノイズによる突然変異。"""
+    mutant = individual.clone()
+    mutant.noise_strength = float(np.clip(
+        mutant.noise_strength + np.random.normal(0, noise_sigma), 0.05, 0.5))
+    mutant.guidance_scale = float(np.clip(
+        mutant.guidance_scale + np.random.normal(0, gs_sigma), 1.0, 15.0))
+    mutant.mask_start = float(np.clip(
+        mutant.mask_start + np.random.normal(0, mask_sigma), 0.0, 0.95))
+    mutant.mask_end = float(np.clip(
+        mutant.mask_end + np.random.normal(0, mask_sigma), 0.05, 1.0))
+    mutant._enforce_mask_validity()
+    mutant.seed = int(np.random.randint(0, 2**32 - 1))
+    mutant.metadata = {
+        "parent_id": individual.id,
+        "operation": "mutate_style_transfer",
+        "noise_sigma": noise_sigma,
+        "gs_sigma": gs_sigma,
     }
     mutant.generation = individual.generation + 1
     return mutant
