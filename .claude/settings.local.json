@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from audioldm.iec_pipeline import AudioLDM_IEC; from audioldm.iec import LatentZ0Genotype, crossover_z0_slerp, mutate_z0_gaussian; print\\('import OK'\\)\")"
+    ]
+  }
+}

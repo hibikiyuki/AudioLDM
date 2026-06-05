@@ -1,0 +1,43 @@
+条件付けベクトル（CLAP text embedding）遺伝子型 — 検証結果
+実行日時: 2026-05-26 10:50:50
+デバイス: cuda
+ddim_steps: 200
+
+
+=== Exp 4: Sanity check ===
+Prompt A                             Prompt B                              cos_sim
+----------------------------------------------------------------------------------
+calm piano music                     calm piano music                      +1.0000
+calm piano music                     slow relaxing melody                  +0.5878
+calm piano music                     energetic metal guitar                +0.3934
+calm piano music                     dog barking loudly                    +0.1969
+
+=== Exp 1: 補間の連続性 ===
+Prompt A: calm acoustic piano music
+Prompt B: energetic electronic dance music with heavy bass
+    α     sim→A     sim→B     quality
+----------------------------------------
+ 0.00   +0.3581   +0.0302          OK
+ 0.25   +0.2520   +0.0352          OK
+ 0.50   +0.1103   +0.2540          OK
+ 0.75   -0.0144   +0.3124          OK
+ 1.00   +0.0109   +0.3977          OK
+
+=== Exp 2: 突然変異の効果 ===
+Base prompt: calm acoustic piano music
+     σ    sim→base   cond_dist     quality
+--------------------------------------------
+ 0.000     +1.0000      0.0000          OK
+ 0.020     +0.8768      0.0816          OK
+ 0.050     +0.6810      0.3889          OK
+ 0.100     +0.4855      0.6281          OK
+ 0.200     +0.4462      0.8599          OK
+ 0.500     +0.2217      0.9525          OK
+
+=== Exp 3: 多様性の相関 ===
+Base prompt: calm acoustic piano music
+σ = 0.1, n = 6
+conditioning 空間の平均ペアワイズ cosine 距離: 0.7558
+音声 CLAP 空間の平均ペアワイズ cosine 距離: 0.4735
+多様性伝達率 (audio/cond): 0.6265
+  ※ 1.0 に近いほど conditioning 操作が音響多様性を正確に制御できている

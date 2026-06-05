@@ -19,8 +19,11 @@ from audioldm.iec import (
     TransformGenotype, crossover_matrix_uniform, mutate_transform_gaussian,
     LatentZ0Genotype, crossover_z0_slerp, mutate_z0_gaussian, slerp,
     StyleTransferGenotype, crossover_style_transfer, mutate_style_transfer,
+    ConditioningGenotype, slerp_conditioning, mutate_conditioning_gaussian,
+    mutate_conditioning_micro_slerp, crossover_conditioning_slerp,
     STYLE_WORD_BANK,
 )
+from audioldm.prompt_pool import PROMPT_POOL, sample_prompts
 
 
 class AudioLDM_IEC:
@@ -35,7 +38,7 @@ class AudioLDM_IEC:
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         population_size: int = 6,
         duration: float = 5.0,
-        guidance_scale: float = 5.0, # ガイダンススケールのデフォルト値を5.0に設定
+        guidance_scale: float = 2.5, # ガイダンススケールのデフォルト値を2.5に設定
         ddim_steps: int = 200,
         n_candidate_gen_per_text: int = 3,
         ga_mode: str = "latent",
@@ -178,7 +181,9 @@ class AudioLDM_IEC:
         unconditional_guidance_scale: Optional[float] = None,
         ddim_eta: float = 0.0,
     ) -> np.ndarray:
-        """AudioGenotype / TransformGenotype / LatentZ0Genotype を問わず音声を生成するディスパッチャ。"""
+        """AudioGenotype / TransformGenotype / LatentZ0Genotype / ConditioningGenotype を問わず音声を生成するディスパッチャ。"""
+        if isinstance(genotype, ConditioningGenotype):
+            return self._generate_audio_from_conditioning_genotype(genotype)
         if isinstance(genotype, LatentZ0Genotype):
             return self._generate_audio_from_z0_genotype(genotype)
         if isinstance(genotype, TransformGenotype):
@@ -553,6 +558,49 @@ class AudioLDM_IEC:
         ranked = sorted(zip(words, sims.cpu().tolist()), key=lambda x: -x[1])
         return ranked[:top_k]
 
+    def rank_differential_style_words(
+        self,
+        audio_b_path: str,
+        audio_a_path: str,
+        style_words: Optional[List[str]] = None,
+        top_k: int = 5,
+        pool_size: int = 10,
+    ) -> List[Tuple[str, float]]:
+        """B の Top-pool_size スタイル語から A の Top-pool_size スタイル語を除いた B 固有語。
+
+        集合差分: B のトップリストに含まれ A のトップリストに含まれない語を返す。
+        両親で共通して高い語（mysterious, ambient 等）は除外され B 固有のシグナルだけが残る。
+
+        Returns:
+            [(word, score_b), ...] top_k 件（B スコア降順）
+        """
+        words = style_words if style_words is not None else STYLE_WORD_BANK
+        waveform_a = self._load_waveform_for_clap(audio_a_path).to(self.device)
+        waveform_b = self._load_waveform_for_clap(audio_b_path).to(self.device)
+
+        cond = self.latent_diffusion.cond_stage_model
+        orig_prob = cond.unconditional_prob
+        cond.unconditional_prob = 0.0
+        try:
+            with torch.no_grad():
+                cond.embed_mode = "audio"
+                audio_emb_a = cond(waveform_a).squeeze(1)
+                audio_emb_b = cond(waveform_b).squeeze(1)
+                cond.embed_mode = "text"
+                text_emb = cond(words).squeeze(1)
+                sims_a = F.cosine_similarity(
+                    audio_emb_a.expand(len(words), -1), text_emb, dim=1).cpu().tolist()
+                sims_b = F.cosine_similarity(
+                    audio_emb_b.expand(len(words), -1), text_emb, dim=1).cpu().tolist()
+        finally:
+            cond.embed_mode = "text"
+            cond.unconditional_prob = orig_prob
+
+        top_b = sorted(zip(words, sims_b), key=lambda x: -x[1])[:pool_size]
+        top_a_words = {w for w, _ in sorted(zip(words, sims_a), key=lambda x: -x[1])[:pool_size]}
+        exclusive_b = [(w, s) for w, s in top_b if w not in top_a_words]
+        return exclusive_b[:top_k]
+
     def build_style_prompt(
         self,
         base_prompt: str,
@@ -681,6 +729,359 @@ class AudioLDM_IEC:
                     unconditional_conditioning=uc,
                 )
         return [z0_batch[i:i+1] for i in range(n)]
+
+    # ------------------------------------------------------------------
+    # Conditioning Vector GA
+    # ------------------------------------------------------------------
+
+    # B-2 SLERP 用のデフォルトプロンプトプール
+    def _encode_text_single(self, prompt: str) -> torch.Tensor:
+        """テキストを CLAP text embedding (1, 1, 512) に変換する。"""
+        cond = self.latent_diffusion.cond_stage_model
+        orig_mode = cond.embed_mode
+        orig_prob = cond.unconditional_prob
+        cond.embed_mode = "text"
+        cond.unconditional_prob = 0.0
+        try:
+            with torch.no_grad():
+                emb = cond([prompt, prompt])   # (2, 1, 512)
+                return emb[0:1].clone()        # (1, 1, 512)
+        finally:
+            cond.embed_mode = orig_mode
+            cond.unconditional_prob = orig_prob
+
+    def _generate_audio_from_conditioning_genotype(
+        self, genotype: ConditioningGenotype
+    ) -> np.ndarray:
+        """ConditioningGenotype (CLAP embedding + 固定 x_T) から音声を生成する。"""
+        cond = genotype.embedding.to(self.device)   # (1, 1, 512)
+        x_T = genotype.x_T.to(self.device)          # (1, C, T, F)
+        with self.latent_diffusion.ema_scope("Conditioning Genotype"):
+            with torch.no_grad():
+                uc = self.latent_diffusion.cond_stage_model.get_unconditional_condition(1)
+                samples, _ = self.latent_diffusion.sample_log(
+                    cond=cond,
+                    batch_size=1,
+                    ddim=True,
+                    ddim_steps=self.ddim_steps,
+                    eta=0.0,
+                    unconditional_guidance_scale=self.guidance_scale,
+                    unconditional_conditioning=uc,
+                    x_T=x_T,
+                )
+                if torch.max(torch.abs(samples)) > 1e2:
+                    samples = torch.clip(samples, min=-10, max=10)
+                mel = self.latent_diffusion.decode_first_stage(samples)
+                wf = self.latent_diffusion.mel_spectrogram_to_waveform(mel)
+        return wf[0:1]
+
+    def _compute_centroid_stability(
+        self,
+        embeddings_prev: List[torch.Tensor],
+        embeddings_curr: List[torch.Tensor],
+    ) -> float:
+        """選択個体の重心の世代間コサイン距離を返す。
+
+        値が小さいほど重心が安定（収束）している。閾値 ε=0.01 以下で収束警告。
+        """
+        centroid_prev = torch.stack([e.float().flatten() for e in embeddings_prev]).mean(0)
+        centroid_curr = torch.stack([e.float().flatten() for e in embeddings_curr]).mean(0)
+        sim = F.cosine_similarity(centroid_prev.unsqueeze(0), centroid_curr.unsqueeze(0)).item()
+        return float(1.0 - sim)
+
+    def _compute_population_diversity(
+        self,
+        embeddings: List[torch.Tensor],
+    ) -> float:
+        """集団内の平均ペアワイズ余弦距離を返す。
+
+        値が小さいほど集団が均質（多様性消失）。閾値 δ=0.05 以下で多様性消失警告。
+        """
+        vecs = [e.float().flatten() for e in embeddings]
+        dists = []
+        for i in range(len(vecs)):
+            for j in range(i + 1, len(vecs)):
+                sim = F.cosine_similarity(vecs[i].unsqueeze(0), vecs[j].unsqueeze(0)).item()
+                dists.append(1.0 - sim)
+        return float(np.mean(dists)) if dists else 0.0
+
+    def _compute_conditioning_convergence(
+        self,
+        selected: List[ConditioningGenotype],
+        centroid_eps: float = 0.01,
+        diversity_delta: float = 0.05,
+    ) -> Dict:
+        """選択個体の収束状態を計算し、警告フラグと指標を辞書で返す。
+
+        convergence_history に記録し、2世代連続で重心安定なら centroid_converged=True。
+        """
+        curr_embeddings = [g.embedding for g in self.population.current_generation]
+        diversity = self._compute_population_diversity(curr_embeddings)
+
+        centroid_dist = None
+        if hasattr(self, "_prev_selected_embeddings") and self._prev_selected_embeddings:
+            centroid_dist = self._compute_centroid_stability(
+                self._prev_selected_embeddings,
+                [g.embedding for g in selected],
+            )
+        self._prev_selected_embeddings = [g.embedding.clone() for g in selected]
+
+        centroid_stable = centroid_dist is not None and centroid_dist < centroid_eps
+        diversity_low = diversity < diversity_delta
+
+        # 連続収束カウント
+        if not hasattr(self, "_centroid_stable_streak"):
+            self._centroid_stable_streak = 0
+        if centroid_stable:
+            self._centroid_stable_streak += 1
+        else:
+            self._centroid_stable_streak = 0
+
+        info = {
+            "generation": self.population.generation_number,
+            "centroid_dist": centroid_dist,
+            "diversity": diversity,
+            "centroid_stable": centroid_stable,
+            "centroid_stable_streak": self._centroid_stable_streak,
+            "diversity_low": diversity_low,
+            "centroid_converged": self._centroid_stable_streak >= 2,
+        }
+
+        if not hasattr(self.population, "convergence_history"):
+            self.population.convergence_history = []
+        self.population.convergence_history.append(info)
+
+        return info
+
+    def _generate_audio_batch_conditioning(
+        self, genotypes: List[ConditioningGenotype]
+    ) -> List[np.ndarray]:
+        """ConditioningGenotype のバッチを一括処理する（x_T は全個体で同一を期待）。"""
+        n = len(genotypes)
+        cond_batch = torch.cat([g.embedding.to(self.device) for g in genotypes], dim=0)  # (N,1,512)
+        x_T_batch = genotypes[0].x_T.to(self.device).expand(n, -1, -1, -1).clone()
+
+        with self.latent_diffusion.ema_scope("Conditioning Batch"):
+            with torch.no_grad():
+                uc = self.latent_diffusion.cond_stage_model.get_unconditional_condition(n)
+                samples, _ = self.latent_diffusion.sample_log(
+                    cond=cond_batch,
+                    batch_size=n,
+                    ddim=True,
+                    ddim_steps=self.ddim_steps,
+                    eta=0.0,
+                    unconditional_guidance_scale=self.guidance_scale,
+                    unconditional_conditioning=uc,
+                    x_T=x_T_batch,
+                )
+                if torch.max(torch.abs(samples)) > 1e2:
+                    samples = torch.clip(samples, min=-10, max=10)
+                mel = self.latent_diffusion.decode_first_stage(samples)
+                wf_batch = self.latent_diffusion.mel_spectrogram_to_waveform(mel)
+        return [wf_batch[i:i+1] for i in range(n)]
+
+    def initialize_population_conditioning(
+        self,
+        prompt: str,
+        slerp_alpha: float = 0.2,
+        x_T_seed: Optional[int] = None,
+        prompt_pool: Optional[List[str]] = None,
+    ) -> List[Tuple[ConditioningGenotype, np.ndarray]]:
+        """Conditioning Vector GA の初期個体群を生成する。
+
+        初期多様性の注入: B-2 SLERP（ベースプロンプトのCLAP埋め込みと
+        ランダムプロンプトのCLAP埋め込みの間を alpha だけ補間）。
+        x_T はセッション全体で固定・共有する。
+        """
+        print(f"[Conditioning GA] 第{self.population.generation_number}世代を生成中...")
+        print(f"  プロンプト: '{prompt}'  alpha={slerp_alpha}")
+
+        pool = prompt_pool or PROMPT_POOL
+
+        # 固定 x_T を生成・保存
+        if x_T_seed is not None:
+            gen = torch.Generator(device=self.device).manual_seed(x_T_seed)
+            x_T = torch.randn((1,) + self.latent_shape, device=self.device, generator=gen)
+        else:
+            x_T = torch.randn((1,) + self.latent_shape, device=self.device)
+        self._conditioning_x_T = x_T
+
+        # ベースプロンプトをエンコード
+        c_base = self._encode_text_single(prompt)           # (1, 1, 512)
+        base_norm = float(torch.norm(c_base.float()).item())
+
+        # 重複なしでサンプリング。プール数が個体数より少ない場合のみ replace=True にフォールバック
+        if len(pool) >= self.population_size:
+            sampled_prompts = np.random.choice(pool, size=self.population_size, replace=False).tolist()
+        else:
+            # プールを使い切った後、残りは再度重複なしで補完する
+            sampled_prompts = list(np.random.permutation(pool))
+            while len(sampled_prompts) < self.population_size:
+                extra = np.random.choice(
+                    pool,
+                    size=min(len(pool), self.population_size - len(sampled_prompts)),
+                    replace=False,
+                ).tolist()
+                sampled_prompts.extend(extra)
+            sampled_prompts = sampled_prompts[:self.population_size]
+
+        genotypes: List[ConditioningGenotype] = []
+        for i, rand_prompt in enumerate(sampled_prompts):
+            seed = int(np.random.randint(0, 2**32 - 1))
+            if slerp_alpha > 0.0:
+                c_rand = self._encode_text_single(rand_prompt)
+                embedding = slerp_conditioning(c_base, c_rand, slerp_alpha)
+            else:
+                embedding = c_base.clone()
+            g = ConditioningGenotype(
+                embedding=embedding,
+                x_T=x_T,
+                source_prompt=rand_prompt if slerp_alpha > 0.0 else prompt,
+                seed=seed,
+                metadata={
+                    "ga_mode": "conditioning",
+                    "initialization": "slerp_prompt",
+                    "base_prompt": prompt,
+                    "rand_prompt": rand_prompt,
+                    "slerp_alpha": slerp_alpha,
+                    "prompt": prompt,
+                },
+            )
+            g.generation = self.population.generation_number
+            genotypes.append(g)
+
+        self.population.current_generation = genotypes
+        self.population.history.append([g.clone() for g in genotypes])
+
+        waveforms = self._generate_audio_batch_conditioning(genotypes)
+        print(f"  [Conditioning GA] {len(genotypes)}個体の音声生成完了")
+        return list(zip(genotypes, waveforms))
+
+    def evolve_population_conditioning(
+        self,
+        selected_indices: List[int],
+        mutation_mu_range: Tuple[float, float] = (0.05, 0.15),
+        p_mut: float = 0.4,
+        elite_count: int = 2,
+        random_sample_count: int = 1,
+        prompt_pool: Optional[List[str]] = None,
+    ) -> Tuple[List[Tuple[ConditioningGenotype, np.ndarray]], Dict]:
+        """Conditioning Vector GA の次世代を生成する。
+
+        世代構成（6体標準）:
+          - エリート: min(elite_count, len(selected)) 体
+          - ランダムサンプル: random_sample_count 体（末尾、SLERP B-2）
+          - 交叉スロット: 残り体数（SLERP 交叉 + 確率 p_mut で Micro-SLERP 変異）
+
+        交叉: conditioning vector 間の SLERP (alpha ~ Uniform(0.3, 0.7))
+        変異: Micro-SLERP（プール embedding 方向へ mu ~ Uniform(*mutation_mu_range) だけ移動）
+        ランダムサンプル: プールから新規 CLAP embedding → SLERP B-2 (alpha ~ Uniform(0.3, 0.6))
+
+        Returns:
+            (個体, 波形) のリストと収束情報辞書
+        """
+        print(f"\n[Conditioning GA] 第{self.population.generation_number + 1}世代を生成中...")
+        if not selected_indices:
+            raise ValueError("少なくとも1つの個体を選択してください")
+
+        selected = [self.population.current_generation[i] for i in selected_indices]
+        prompt = selected[0].metadata.get("base_prompt", "")
+        x_T = selected[0].x_T   # 全個体で共有
+
+        pool = prompt_pool or PROMPT_POOL
+        # ベースプロンプトの CLAP embedding（Micro-SLERP 変異の起点として使用）
+        c_base = self._encode_text_single(prompt) if prompt else None
+
+        next_gen: List[ConditioningGenotype] = []
+
+        # 1. エリート保存
+        actual_elite = min(elite_count, len(selected))
+        for i in range(actual_elite):
+            elite = selected[i].clone()
+            elite.generation = self.population.generation_number + 1
+            elite.metadata["elite"] = True
+            elite.metadata["elite_parent_pop_index"] = selected_indices[i]
+            next_gen.append(elite)
+
+        # 2. 末尾にランダムサンプルスロットを予約（後で埋める）
+        actual_random = min(random_sample_count, self.population_size - actual_elite)
+        crossover_slots = self.population_size - actual_elite - actual_random
+
+        # 3. 交叉スロットを埋める
+        while len(next_gen) < actual_elite + crossover_slots:
+            if len(selected) == 1:
+                # 選択個体が1体の場合は Micro-SLERP のみ
+                pool_prompt = sample_prompts(1, exclude=[prompt])[0]
+                c_pool = self._encode_text_single(pool_prompt)
+                child = mutate_conditioning_micro_slerp(
+                    selected[0],
+                    c_pool,
+                    mu=float(np.random.uniform(*mutation_mu_range)),
+                )
+                child.metadata["parent_pop_index"] = selected_indices[0]
+            else:
+                pair_idx = np.random.choice(len(selected), size=2, replace=False)
+                p1, p2 = selected[pair_idx[0]], selected[pair_idx[1]]
+                alpha = float(np.random.uniform(0.3, 0.7))
+                child = crossover_conditioning_slerp(p1, p2, alpha)
+                child.metadata["crossover_parent1_pop_index"] = selected_indices[pair_idx[0]]
+                child.metadata["crossover_parent2_pop_index"] = selected_indices[pair_idx[1]]
+                # 確率 p_mut で Micro-SLERP 変異を適用
+                if np.random.random() < p_mut:
+                    pool_prompt = sample_prompts(1, exclude=[prompt])[0]
+                    c_pool = self._encode_text_single(pool_prompt)
+                    mu = float(np.random.uniform(*mutation_mu_range))
+                    child = mutate_conditioning_micro_slerp(child, c_pool, mu=mu)
+                    child.metadata.update({
+                        "operation": "crossover_then_mutate",
+                        "crossover_type": "slerp",
+                        "crossover_parent1_pop_index": selected_indices[pair_idx[0]],
+                        "crossover_parent2_pop_index": selected_indices[pair_idx[1]],
+                        "crossover_alpha": alpha,
+                        "mu": mu,
+                        "pool_prompt": pool_prompt,
+                    })
+            child.x_T = x_T
+            child.generation = self.population.generation_number + 1
+            child.metadata["base_prompt"] = prompt
+            child.metadata["prompt"] = prompt
+            next_gen.append(child)
+
+        # 4. ランダムサンプルスロット: プールから新規 CLAP embedding → SLERP B-2
+        rs_prompts = sample_prompts(actual_random, exclude=[prompt])
+        for rs_prompt in rs_prompts:
+            c_rand = self._encode_text_single(rs_prompt)
+            alpha_rand = float(np.random.uniform(0.3, 0.6))
+            if c_base is not None:
+                embedding = slerp_conditioning(c_base, c_rand, alpha_rand)
+            else:
+                embedding = c_rand
+            child = ConditioningGenotype(
+                embedding=embedding,
+                x_T=x_T,
+                source_prompt=rs_prompt,
+                seed=int(np.random.randint(0, 2**32 - 1)),
+                metadata={
+                    "ga_mode": "conditioning",
+                    "operation": "random_sample",
+                    "base_prompt": prompt,
+                    "prompt": prompt,
+                    "rand_prompt": rs_prompt,
+                    "slerp_alpha": alpha_rand,
+                },
+            )
+            child.generation = self.population.generation_number + 1
+            next_gen.append(child)
+
+        self.population.generation_number += 1
+        self.population.current_generation = next_gen[:self.population_size]
+        self.population.history.append([g.clone() for g in self.population.current_generation])
+
+        # 5. 収束情報を計算
+        convergence_info = self._compute_conditioning_convergence(selected)
+
+        waveforms = self._generate_audio_batch_conditioning(self.population.current_generation)
+        return list(zip(self.population.current_generation, waveforms)), convergence_info
 
     def initialize_population_z0(
         self,
@@ -897,6 +1298,9 @@ class AudioLDM_IEC:
             # モード切替時はベースノイズをリセット
             self._shared_base_noise = None
 
+        if self.ga_mode == "conditioning":
+            return self.initialize_population_conditioning(prompt=prompt or "")
+
         if self.ga_mode == "transform":
             return self.initialize_population_transform(
                 prompt=prompt, base_noise_seed=base_noise_seed
@@ -975,6 +1379,13 @@ class AudioLDM_IEC:
         sdedit_strength: float = 0.0,
     ) -> List[Tuple]:
         """選択された個体から次世代を生成する（モードに応じてディスパッチ）。"""
+        if self.ga_mode == "conditioning":
+            results, _convergence_info = self.evolve_population_conditioning(
+                selected_indices,
+                elite_count=elite_count,
+            )
+            return results
+
         if self.ga_mode == "transform":
             return self.evolve_population_transform(
                 selected_indices,

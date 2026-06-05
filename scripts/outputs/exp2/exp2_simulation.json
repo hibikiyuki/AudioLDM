@@ -1,0 +1,2002 @@
+[
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.2,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.030515171587467194,
+        "mean_fitness": -0.06616763398051262,
+        "diversity": 0.09272301991780599,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.017748530954122543,
+        "mean_fitness": -0.03558397851884365,
+        "diversity": 0.10379730860392253,
+        "centroid_dist": 0.08298921585083008,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.007646102458238602,
+        "mean_fitness": -0.021721964081128437,
+        "diversity": 0.1819963018099467,
+        "centroid_dist": 0.15563750267028809,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.007646102458238602,
+        "mean_fitness": -0.022318675182759762,
+        "diversity": 0.200537113348643,
+        "centroid_dist": 0.04542654752731323,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.012798339128494263,
+        "mean_fitness": -0.005004283661643664,
+        "diversity": 0.09890713294347127,
+        "centroid_dist": 0.07869845628738403,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.012999741360545158,
+        "mean_fitness": 0.006424416943142812,
+        "diversity": 0.16109170913696289,
+        "centroid_dist": 0.12703090906143188,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.01539777684956789,
+        "mean_fitness": 0.009267008708169064,
+        "diversity": 0.17673077583312988,
+        "centroid_dist": 0.005412399768829346,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.04096643999218941,
+        "mean_fitness": 0.019054452578226726,
+        "diversity": 0.05513805150985718,
+        "centroid_dist": 0.040497422218322754,
+        "stagnant_streak": 0
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.04096643999218941,
+    "final_diversity": 0.05513805150985718
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.2,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.049786556512117386,
+        "mean_fitness": -0.06779574168225129,
+        "diversity": 0.0981953223546346,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.008091239258646965,
+        "mean_fitness": -0.046029746842881046,
+        "diversity": 0.13065627415974934,
+        "centroid_dist": 0.09749531745910645,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.008091239258646965,
+        "mean_fitness": -0.03164777749528488,
+        "diversity": 0.16965258121490479,
+        "centroid_dist": 0.12602370977401733,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.008091239258646965,
+        "mean_fitness": -0.018994363956153393,
+        "diversity": 0.12927101850509642,
+        "centroid_dist": 0.011170566082000732,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.001857338473200798,
+        "mean_fitness": -0.011963660518328348,
+        "diversity": 0.16285762389500935,
+        "centroid_dist": 0.12734204530715942,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.001857338473200798,
+        "mean_fitness": -0.006290932806829612,
+        "diversity": 0.1533177892367045,
+        "centroid_dist": 0.042658090591430664,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.0018165484070777893,
+        "mean_fitness": -0.010909993822375933,
+        "diversity": 0.10489139159520468,
+        "centroid_dist": 0.009324073791503906,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.0005357023328542709,
+        "mean_fitness": -0.010977007448673248,
+        "diversity": 0.08924375375111898,
+        "centroid_dist": 0.011939048767089844,
+        "stagnant_streak": 0
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.0005357023328542709,
+    "final_diversity": 0.08924375375111898
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.2,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.04357440024614334,
+        "mean_fitness": -0.052634542187054954,
+        "diversity": 0.09925150076548259,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.04357440024614334,
+        "mean_fitness": -0.046812145660320915,
+        "diversity": 0.14218297004699706,
+        "centroid_dist": 0.010828852653503418,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.04357440024614334,
+        "mean_fitness": -0.045482754707336426,
+        "diversity": 0.0872655987739563,
+        "centroid_dist": 0.062462449073791504,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.03666625916957855,
+        "mean_fitness": -0.044540623823801674,
+        "diversity": 0.1358451008796692,
+        "centroid_dist": 0.10795474052429199,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.014430957846343517,
+        "mean_fitness": -0.03565226976449291,
+        "diversity": 0.16708714962005616,
+        "centroid_dist": 0.12573248147964478,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.011330341920256615,
+        "mean_fitness": -0.022599486789355677,
+        "diversity": 0.2086109737555186,
+        "centroid_dist": 0.16509747505187988,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.04726620763540268,
+        "mean_fitness": 0.0074750392232090235,
+        "diversity": 0.20511073271433514,
+        "centroid_dist": 0.17528599500656128,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.04726620763540268,
+        "mean_fitness": 0.026796788404074807,
+        "diversity": 0.15598447720209757,
+        "centroid_dist": 0.044749557971954346,
+        "stagnant_streak": 0
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.04726620763540268,
+    "final_diversity": 0.15598447720209757
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.2,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.052449457347393036,
+        "mean_fitness": -0.06410918260614078,
+        "diversity": 0.09612978299458821,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.01629829965531826,
+        "mean_fitness": -0.0463516175126036,
+        "diversity": 0.13328881661097208,
+        "centroid_dist": 0.08070605993270874,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.010043448768556118,
+        "mean_fitness": -0.026957321756829817,
+        "diversity": 0.14898258050282795,
+        "centroid_dist": 0.1207418441772461,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.010043448768556118,
+        "mean_fitness": -0.0019304511758188407,
+        "diversity": 0.09241751829783122,
+        "centroid_dist": 0.022266387939453125,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.04422203451395035,
+        "mean_fitness": 0.011692075136428079,
+        "diversity": 0.08294781446456909,
+        "centroid_dist": 0.0593450665473938,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.07212205231189728,
+        "mean_fitness": 0.033051305605719485,
+        "diversity": 0.13870762983957927,
+        "centroid_dist": 0.10262274742126465,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.0798972100019455,
+        "mean_fitness": 0.06344210542738438,
+        "diversity": 0.1090670108795166,
+        "centroid_dist": 0.0805429220199585,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.0799102932214737,
+        "mean_fitness": 0.06922197466095288,
+        "diversity": 0.1258950432141622,
+        "centroid_dist": 0.016843020915985107,
+        "stagnant_streak": 0
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.0799102932214737,
+    "final_diversity": 0.1258950432141622
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.2,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": -0.05031104385852814,
+        "mean_fitness": -0.0606263962884744,
+        "diversity": 0.09551616509755452,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.004407547414302826,
+        "mean_fitness": -0.04083877305189768,
+        "diversity": 0.1593968073527018,
+        "centroid_dist": 0.12023341655731201,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.008771022781729698,
+        "mean_fitness": -0.018705655199786026,
+        "diversity": 0.17866158485412598,
+        "centroid_dist": 0.14921164512634277,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.008771022781729698,
+        "mean_fitness": -0.005637405129770438,
+        "diversity": 0.15811689297358195,
+        "centroid_dist": 0.016537189483642578,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.008771022781729698,
+        "mean_fitness": 0.0005887203539411227,
+        "diversity": 0.0457951545715332,
+        "centroid_dist": 0.0014683008193969727,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.008771022781729698,
+        "mean_fitness": 0.005674951709806919,
+        "diversity": 0.14544732570648194,
+        "centroid_dist": 0.00012063980102539062,
+        "stagnant_streak": 2
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.028103739023208618,
+        "mean_fitness": 0.013151429283122221,
+        "diversity": 0.0986001173655192,
+        "centroid_dist": 0.0819358229637146,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.2,
+        "max_fitness": 0.028103739023208618,
+        "mean_fitness": 0.022673141521712143,
+        "diversity": 0.16216255823771158,
+        "centroid_dist": 0.02055966854095459,
+        "stagnant_streak": 0
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.028103739023208618,
+    "final_diversity": 0.16216255823771158
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.3,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": -0.031405009329319,
+        "mean_fitness": -0.04969313492377599,
+        "diversity": 0.2032837669054667,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": -0.031405009329319,
+        "mean_fitness": -0.04012010681132475,
+        "diversity": 0.12056624094645182,
+        "centroid_dist": 0.0,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": -0.015982117503881454,
+        "mean_fitness": -0.031012736881772678,
+        "diversity": 0.12829965750376385,
+        "centroid_dist": 0.10274076461791992,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": -0.013345949351787567,
+        "mean_fitness": -0.0218439856544137,
+        "diversity": 0.10422585010528565,
+        "centroid_dist": 0.02029651403427124,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.015061357989907265,
+        "mean_fitness": -0.009042430979510149,
+        "diversity": 0.1285768469174703,
+        "centroid_dist": 0.09496688842773438,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.015061357989907265,
+        "mean_fitness": -0.0044019076352318125,
+        "diversity": 0.16015892028808593,
+        "centroid_dist": 0.030691802501678467,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.015061357989907265,
+        "mean_fitness": 0.006425200340648492,
+        "diversity": 0.07937666177749633,
+        "centroid_dist": 0.002578258514404297,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.015061357989907265,
+        "mean_fitness": 0.004438368293146293,
+        "diversity": 0.05748542944590251,
+        "centroid_dist": 0.0019354820251464844,
+        "stagnant_streak": 2
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.015061357989907265,
+    "final_diversity": 0.05748542944590251
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.3,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": -0.0309615321457386,
+        "mean_fitness": -0.052798667922616005,
+        "diversity": 0.19359638690948486,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": -0.028489746153354645,
+        "mean_fitness": -0.042117212588588394,
+        "diversity": 0.14885388215382894,
+        "centroid_dist": 0.024548828601837158,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.013207640498876572,
+        "mean_fitness": -0.021526637797554333,
+        "diversity": 0.09691211382548014,
+        "centroid_dist": 0.07035362720489502,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.013207640498876572,
+        "mean_fitness": -0.011208750928441683,
+        "diversity": 0.16581865151723227,
+        "centroid_dist": 0.018023252487182617,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.013207640498876572,
+        "mean_fitness": 0.00767200393602252,
+        "diversity": 0.09659584760665893,
+        "centroid_dist": 0.07082158327102661,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.056774549186229706,
+        "mean_fitness": 0.020712275058031082,
+        "diversity": 0.18813995520273843,
+        "centroid_dist": 0.11610716581344604,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.056774549186229706,
+        "mean_fitness": 0.039138096695144974,
+        "diversity": 0.17096094687779745,
+        "centroid_dist": 0.04099416732788086,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.056774549186229706,
+        "mean_fitness": 0.04543006420135498,
+        "diversity": 0.1457519054412842,
+        "centroid_dist": 0.01143348217010498,
+        "stagnant_streak": 0
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.056774549186229706,
+    "final_diversity": 0.1457519054412842
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.3,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": -0.03717774897813797,
+        "mean_fitness": -0.05272023752331734,
+        "diversity": 0.21093517939249676,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": -0.026300404220819473,
+        "mean_fitness": -0.03808717677990595,
+        "diversity": 0.1249626119931539,
+        "centroid_dist": 0.10000741481781006,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": -0.022153638303279877,
+        "mean_fitness": -0.03189469935993353,
+        "diversity": 0.12565652132034302,
+        "centroid_dist": 0.09907519817352295,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.0005649775266647339,
+        "mean_fitness": -0.020566409453749657,
+        "diversity": 0.1149505098660787,
+        "centroid_dist": 0.09747582674026489,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.0005649775266647339,
+        "mean_fitness": -0.01074318370471398,
+        "diversity": 0.12354918718338012,
+        "centroid_dist": 0.01602262258529663,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.000685572624206543,
+        "mean_fitness": -0.003997578596075376,
+        "diversity": 0.07487892707188924,
+        "centroid_dist": 0.05067765712738037,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.000685572624206543,
+        "mean_fitness": -0.001328548106054465,
+        "diversity": 0.10841904878616333,
+        "centroid_dist": 0.01564270257949829,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.02676096186041832,
+        "mean_fitness": 0.005025557863215606,
+        "diversity": 0.1513298273086548,
+        "centroid_dist": 0.12123966217041016,
+        "stagnant_streak": 0
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.02676096186041832,
+    "final_diversity": 0.1513298273086548
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.3,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": -0.011798320338129997,
+        "mean_fitness": -0.05648099910467863,
+        "diversity": 0.1975957791010539,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.022797217592597008,
+        "mean_fitness": -0.02074705498913924,
+        "diversity": 0.12378453016281128,
+        "centroid_dist": 0.09099042415618896,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.0469992533326149,
+        "mean_fitness": 0.011184310230116049,
+        "diversity": 0.13914748032887778,
+        "centroid_dist": 0.143405020236969,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.0469992533326149,
+        "mean_fitness": 0.0334642855450511,
+        "diversity": 0.08785103956858317,
+        "centroid_dist": 0.06684106588363647,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.0469992533326149,
+        "mean_fitness": 0.026979323476552963,
+        "diversity": 0.1714467724164327,
+        "centroid_dist": 0.01297903060913086,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.0469992533326149,
+        "mean_fitness": 0.04446258023381233,
+        "diversity": 0.06068764527638753,
+        "centroid_dist": 0.0018117427825927734,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.07222815603017807,
+        "mean_fitness": 0.04991760849952698,
+        "diversity": 0.09077253341674804,
+        "centroid_dist": 0.06261122226715088,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.07335276156663895,
+        "mean_fitness": 0.06287401107450326,
+        "diversity": 0.16140110890070597,
+        "centroid_dist": 0.03167259693145752,
+        "stagnant_streak": 0
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.07335276156663895,
+    "final_diversity": 0.16140110890070597
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.3,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": -0.03717774897813797,
+        "mean_fitness": -0.0659320658693711,
+        "diversity": 0.2079836924870809,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": -0.0351397842168808,
+        "mean_fitness": -0.04228726401925087,
+        "diversity": 0.1889275312423706,
+        "centroid_dist": 0.1382879614830017,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": -0.0351397842168808,
+        "mean_fitness": -0.04059656895697117,
+        "diversity": 0.2156257927417755,
+        "centroid_dist": 0.0,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.01095606666058302,
+        "mean_fitness": -0.029081175879885752,
+        "diversity": 0.23766229152679444,
+        "centroid_dist": 0.12910395860671997,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.01095606666058302,
+        "mean_fitness": -0.010434926642725864,
+        "diversity": 0.19121307134628296,
+        "centroid_dist": 0.1514526605606079,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.01095606666058302,
+        "mean_fitness": 0.004267939754451315,
+        "diversity": 0.16323695182800294,
+        "centroid_dist": 0.009374439716339111,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.01095606666058302,
+        "mean_fitness": 0.0071791970791916055,
+        "diversity": 0.13867396116256714,
+        "centroid_dist": 0.003149867057800293,
+        "stagnant_streak": 2
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.024645496159791946,
+        "mean_fitness": 0.013556162516276041,
+        "diversity": 0.0587430993715922,
+        "centroid_dist": 0.06337499618530273,
+        "stagnant_streak": 0
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.024645496159791946,
+    "final_diversity": 0.0587430993715922
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.5,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": -0.009134139865636826,
+        "mean_fitness": -0.04360329359769821,
+        "diversity": 0.5046005010604858,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": -0.009134139865636826,
+        "mean_fitness": -0.017495682773490746,
+        "diversity": 0.23441768487294515,
+        "centroid_dist": 0.19709187746047974,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.024949155747890472,
+        "mean_fitness": -0.004739320216079553,
+        "diversity": 0.08429507811864217,
+        "centroid_dist": 0.07316511869430542,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.03251902014017105,
+        "mean_fitness": 0.01569044931481282,
+        "diversity": 0.09866158564885458,
+        "centroid_dist": 0.012343049049377441,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.03541390597820282,
+        "mean_fitness": 0.02840091319133838,
+        "diversity": 0.10934025049209595,
+        "centroid_dist": 0.07907289266586304,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.06726490706205368,
+        "mean_fitness": 0.03870904507736365,
+        "diversity": 0.15743021965026854,
+        "centroid_dist": 0.08562564849853516,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.06726490706205368,
+        "mean_fitness": 0.03757207840681076,
+        "diversity": 0.22356124520301818,
+        "centroid_dist": 0.02494025230407715,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.06963233649730682,
+        "mean_fitness": 0.05940470906595389,
+        "diversity": 0.10165345271428426,
+        "centroid_dist": 0.010053753852844238,
+        "stagnant_streak": 0
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.06963233649730682,
+    "final_diversity": 0.10165345271428426
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.5,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": -0.02269977703690529,
+        "mean_fitness": -0.04735961960007747,
+        "diversity": 0.4964025994141897,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.008169172331690788,
+        "mean_fitness": -0.02014455385506153,
+        "diversity": 0.2720278998215993,
+        "centroid_dist": 0.22708725929260254,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.011099436320364475,
+        "mean_fitness": -0.006112473861624797,
+        "diversity": 0.17201659679412842,
+        "centroid_dist": 0.13597643375396729,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.030439583584666252,
+        "mean_fitness": 0.013667278767873844,
+        "diversity": 0.09407064119974771,
+        "centroid_dist": 0.05558878183364868,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.033506736159324646,
+        "mean_fitness": 0.024510498624294996,
+        "diversity": 0.09295280774434407,
+        "centroid_dist": 0.02203989028930664,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.033506736159324646,
+        "mean_fitness": 0.024675561115145683,
+        "diversity": 0.11906919479370118,
+        "centroid_dist": 5.960464477539063e-08,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.033506736159324646,
+        "mean_fitness": 0.027805554525305826,
+        "diversity": 0.1130500872929891,
+        "centroid_dist": 0.0036185383796691895,
+        "stagnant_streak": 2
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.033506736159324646,
+        "mean_fitness": 0.029989713492492836,
+        "diversity": 0.03970813353856405,
+        "centroid_dist": 0.0004292130470275879,
+        "stagnant_streak": 3
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.033506736159324646,
+    "final_diversity": 0.03970813353856405
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.5,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": -0.040339354425668716,
+        "mean_fitness": -0.07098877554138501,
+        "diversity": 0.4937401374181112,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": -0.0148047786206007,
+        "mean_fitness": -0.04066341711829106,
+        "diversity": 0.21211456656455993,
+        "centroid_dist": 0.20171165466308594,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.01512676291167736,
+        "mean_fitness": -0.02004302976032098,
+        "diversity": 0.15228142738342285,
+        "centroid_dist": 0.11948496103286743,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.01512676291167736,
+        "mean_fitness": -0.00850431558986505,
+        "diversity": 0.1818646272023519,
+        "centroid_dist": 0.04022163152694702,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.043910298496484756,
+        "mean_fitness": 0.015083428782721361,
+        "diversity": 0.08329578240712483,
+        "centroid_dist": 0.06444650888442993,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.043910298496484756,
+        "mean_fitness": 0.022650344918171566,
+        "diversity": 0.12664360602696736,
+        "centroid_dist": 0.016411542892456055,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.043910298496484756,
+        "mean_fitness": 0.03594215586781502,
+        "diversity": 0.07484209537506104,
+        "centroid_dist": 0.0064105987548828125,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.045118268579244614,
+        "mean_fitness": 0.04227671834329764,
+        "diversity": 0.09087998072306315,
+        "centroid_dist": 0.003974437713623047,
+        "stagnant_streak": 2
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.045118268579244614,
+    "final_diversity": 0.09087998072306315
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.5,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": -0.017792727798223495,
+        "mean_fitness": -0.06230472897489866,
+        "diversity": 0.5047241707642873,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": -0.017792727798223495,
+        "mean_fitness": -0.0296183234701554,
+        "diversity": 0.22276579737663268,
+        "centroid_dist": 0.18373799324035645,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.021104948595166206,
+        "mean_fitness": -0.016306566074490547,
+        "diversity": 0.19598910411198933,
+        "centroid_dist": 0.15088564157485962,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.021104948595166206,
+        "mean_fitness": -0.005476691915343205,
+        "diversity": 0.2339072545369466,
+        "centroid_dist": 0.05564165115356445,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.021104948595166206,
+        "mean_fitness": 0.013325791029880444,
+        "diversity": 0.1379172960917155,
+        "centroid_dist": 0.010115385055541992,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.03430560976266861,
+        "mean_fitness": 0.021950294884542625,
+        "diversity": 0.06739972432454427,
+        "centroid_dist": 0.048081040382385254,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.03430560976266861,
+        "mean_fitness": 0.028586661132673424,
+        "diversity": 0.10010243654251098,
+        "centroid_dist": 0.007714211940765381,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.03430560976266861,
+        "mean_fitness": 0.030024742086728413,
+        "diversity": 0.08210367361704508,
+        "centroid_dist": 0.005905866622924805,
+        "stagnant_streak": 2
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.03430560976266861,
+    "final_diversity": 0.08210367361704508
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.5,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.026024796068668365,
+        "mean_fitness": -0.05016816748927037,
+        "diversity": 0.5007824341456095,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.03692728281021118,
+        "mean_fitness": 0.014708980141828457,
+        "diversity": 0.2021117925643921,
+        "centroid_dist": 0.16694605350494385,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.03692728281021118,
+        "mean_fitness": 0.02850842010229826,
+        "diversity": 0.08595104614893595,
+        "centroid_dist": 0.012704730033874512,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.05182307958602905,
+        "mean_fitness": 0.03759004734456539,
+        "diversity": 0.05462836821873983,
+        "centroid_dist": 0.0382615327835083,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.05182307958602905,
+        "mean_fitness": 0.039599714490274586,
+        "diversity": 0.14193394978841145,
+        "centroid_dist": 0.013293743133544922,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.05344639718532562,
+        "mean_fitness": 0.046265398462613426,
+        "diversity": 0.07735221385955811,
+        "centroid_dist": 0.0023539066314697266,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.07754345238208771,
+        "mean_fitness": 0.05692426487803459,
+        "diversity": 0.14259581168492635,
+        "centroid_dist": 0.11403834819793701,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.5,
+        "max_fitness": 0.07754345238208771,
+        "mean_fitness": 0.0540914631759127,
+        "diversity": 0.2236825108528137,
+        "centroid_dist": 0.022359371185302734,
+        "stagnant_streak": 0
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.07754345238208771,
+    "final_diversity": 0.2236825108528137
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.7,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.017082400619983673,
+        "mean_fitness": -0.02933473070152104,
+        "diversity": 0.8005369409918786,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.036907657980918884,
+        "mean_fitness": 0.016358564142137766,
+        "diversity": 0.3238397518793742,
+        "centroid_dist": 0.26614928245544434,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.036907657980918884,
+        "mean_fitness": 0.026441966649144888,
+        "diversity": 0.11864623228708902,
+        "centroid_dist": 0.020254909992218018,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.04183684289455414,
+        "mean_fitness": 0.03310543671250343,
+        "diversity": 0.09760646422704061,
+        "centroid_dist": 0.008074820041656494,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.04183684289455414,
+        "mean_fitness": 0.029307119858761627,
+        "diversity": 0.11180827220280966,
+        "centroid_dist": 0.0029738545417785645,
+        "stagnant_streak": 2
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.10689111053943634,
+        "mean_fitness": 0.05203400366008282,
+        "diversity": 0.1320436159769694,
+        "centroid_dist": 0.10417962074279785,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.11126779764890671,
+        "mean_fitness": 0.0898003155986468,
+        "diversity": 0.14559205770492553,
+        "centroid_dist": 0.13201940059661865,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.1198967695236206,
+        "mean_fitness": 0.10590713222821553,
+        "diversity": 0.11449600060780843,
+        "centroid_dist": 0.005097389221191406,
+        "stagnant_streak": 1
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.1198967695236206,
+    "final_diversity": 0.11449600060780843
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.7,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": -0.02143467776477337,
+        "mean_fitness": -0.04880876994381348,
+        "diversity": 0.7888381247719128,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": -0.02143467776477337,
+        "mean_fitness": -0.03657675255089998,
+        "diversity": 0.28052799503008524,
+        "centroid_dist": 0.0,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": -0.01924443617463112,
+        "mean_fitness": -0.03190272580832243,
+        "diversity": 0.3000754137833913,
+        "centroid_dist": 0.2408086657524109,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.008015158586204052,
+        "mean_fitness": -0.015307400530825058,
+        "diversity": 0.12032756805419922,
+        "centroid_dist": 0.06463229656219482,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.03031039796769619,
+        "mean_fitness": 0.0012400921744604905,
+        "diversity": 0.13629380464553834,
+        "centroid_dist": 0.11712366342544556,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.03031039796769619,
+        "mean_fitness": 0.012003675879289707,
+        "diversity": 0.10032644669214884,
+        "centroid_dist": 0.012578725814819336,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.03031039796769619,
+        "mean_fitness": 0.01874133913467328,
+        "diversity": 0.12045958439509073,
+        "centroid_dist": 0.006067097187042236,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.041786544024944305,
+        "mean_fitness": 0.031093737731377285,
+        "diversity": 0.06250815391540528,
+        "centroid_dist": 0.04846680164337158,
+        "stagnant_streak": 0
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.041786544024944305,
+    "final_diversity": 0.06250815391540528
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.7,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.006215520203113556,
+        "mean_fitness": -0.014545018707091609,
+        "diversity": 0.7834589476386706,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.04135974496603012,
+        "mean_fitness": 0.00878940049248437,
+        "diversity": 0.38414634118477503,
+        "centroid_dist": 0.3414309024810791,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.04669786989688873,
+        "mean_fitness": 0.028396037717660267,
+        "diversity": 0.18242100477218628,
+        "centroid_dist": 0.1783527135848999,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.04669786989688873,
+        "mean_fitness": 0.03755840100347996,
+        "diversity": 0.12867366870244343,
+        "centroid_dist": 0.0,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.04669786989688873,
+        "mean_fitness": 0.04381388115386168,
+        "diversity": 0.05685938199361165,
+        "centroid_dist": 0.005312085151672363,
+        "stagnant_streak": 2
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.052959997206926346,
+        "mean_fitness": 0.038722360196212925,
+        "diversity": 0.11936073303222657,
+        "centroid_dist": 0.004263043403625488,
+        "stagnant_streak": 3
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.06012825667858124,
+        "mean_fitness": 0.05148170950512091,
+        "diversity": 0.07677987019220987,
+        "centroid_dist": 0.05860269069671631,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.06064700335264206,
+        "mean_fitness": 0.05648707101742426,
+        "diversity": 0.16300978660583496,
+        "centroid_dist": 0.022357821464538574,
+        "stagnant_streak": 0
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.06064700335264206,
+    "final_diversity": 0.16300978660583496
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.7,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.006215520203113556,
+        "mean_fitness": -0.01643155065054695,
+        "diversity": 0.7730453163385391,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.012981927022337914,
+        "mean_fitness": -4.387926310300827e-05,
+        "diversity": 0.33144828081130984,
+        "centroid_dist": 0.0053865909576416016,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.012981927022337914,
+        "mean_fitness": 0.009750090384234985,
+        "diversity": 0.07074270645777385,
+        "centroid_dist": 0.003106236457824707,
+        "stagnant_streak": 2
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.018863849341869354,
+        "mean_fitness": 0.009738130494952202,
+        "diversity": 0.11719496250152588,
+        "centroid_dist": 0.006240904331207275,
+        "stagnant_streak": 3
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.021195504814386368,
+        "mean_fitness": 0.014343227570255598,
+        "diversity": 0.12149576346079509,
+        "centroid_dist": 0.0029346346855163574,
+        "stagnant_streak": 4
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.021195504814386368,
+        "mean_fitness": 0.011779999981323877,
+        "diversity": 0.14677834113438923,
+        "centroid_dist": 0.0024418234825134277,
+        "stagnant_streak": 5
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.021221235394477844,
+        "mean_fitness": 0.00793395284563303,
+        "diversity": 0.11905572017033896,
+        "centroid_dist": 0.00011199712753295898,
+        "stagnant_streak": 6
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.021221235394477844,
+        "mean_fitness": 0.014298082794994116,
+        "diversity": 0.13220027287801106,
+        "centroid_dist": 9.59634780883789e-06,
+        "stagnant_streak": 7
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.021221235394477844,
+    "final_diversity": 0.13220027287801106
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.7,
+    "target_prompt": "[simulated]",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.005096938461065292,
+        "mean_fitness": -0.039809356754024826,
+        "diversity": 0.8109057992696762,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.007328336127102375,
+        "mean_fitness": -0.012300257726262013,
+        "diversity": 0.3258396953344345,
+        "centroid_dist": 0.27499282360076904,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.007328336127102375,
+        "mean_fitness": -0.004038915038108826,
+        "diversity": 0.1387947718302409,
+        "centroid_dist": 0.0045737624168396,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.007328336127102375,
+        "mean_fitness": 0.005671686337639888,
+        "diversity": 0.07405670086542765,
+        "centroid_dist": 0.003863215446472168,
+        "stagnant_streak": 2
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.03290799260139465,
+        "mean_fitness": 0.009097176293532053,
+        "diversity": 0.16345714728037516,
+        "centroid_dist": 0.12740004062652588,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.05734017491340637,
+        "mean_fitness": 0.0292668710462749,
+        "diversity": 0.1850799798965454,
+        "centroid_dist": 0.15707629919052124,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.05734017491340637,
+        "mean_fitness": 0.04241825050363938,
+        "diversity": 0.17417428493499756,
+        "centroid_dist": 0.022188782691955566,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.7,
+        "max_fitness": 0.061070848256349564,
+        "mean_fitness": 0.04901461179057757,
+        "diversity": 0.07414779663085938,
+        "centroid_dist": 0.006602644920349121,
+        "stagnant_streak": 1
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.061070848256349564,
+    "final_diversity": 0.07414779663085938
+  }
+]

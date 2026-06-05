@@ -757,6 +757,129 @@ def mutate_style_transfer(
     return mutant
 
 
+class ConditioningGenotype:
+    """
+    CLAP text embedding を遺伝子とする個体。
+    x_T（初期ノイズ）は集団全体で固定・共有し、conditioning vector のみを進化させる。
+
+    embedding: CLAP text embedding  shape: (1, 1, 512)
+    x_T:       固定初期ノイズ        shape: (1, C, T, F) — 全個体で同じ参照を保持
+    """
+
+    def __init__(
+        self,
+        embedding: torch.Tensor,
+        x_T: torch.Tensor,
+        source_prompt: str = "",
+        seed: Optional[int] = None,
+        metadata: Optional[Dict] = None,
+    ):
+        self.embedding = embedding.clone()
+        self.x_T = x_T          # 全個体で共有する参照（clone しない）
+        self.source_prompt = source_prompt
+        self.seed = seed
+        self.metadata = metadata or {}
+        self.fitness = 0.0
+        self.generation = 0
+        self.id = self._generate_id()
+
+    def _generate_id(self) -> str:
+        return f"cond_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+
+    def clone(self) -> 'ConditioningGenotype':
+        cloned = ConditioningGenotype(
+            embedding=self.embedding.clone(),
+            x_T=self.x_T,           # 共有参照をそのまま引き継ぐ
+            source_prompt=self.source_prompt,
+            seed=self.seed,
+            metadata=self.metadata.copy(),
+        )
+        cloned.fitness = self.fitness
+        cloned.generation = self.generation
+        return cloned
+
+
+def slerp_conditioning(
+    c0: torch.Tensor, c1: torch.Tensor, t: float, threshold: float = 0.9995
+) -> torch.Tensor:
+    """2つの conditioning vector を球面線形補間する。
+
+    c0, c1: (1, 1, 512)  または任意の同形状テンソル
+    Returns: 同形状テンソル
+    """
+    shape = c0.shape
+    v0 = c0.reshape(-1).float()
+    v1 = c1.reshape(-1).float()
+    v0_n = v0 / (torch.norm(v0) + 1e-8)
+    v1_n = v1 / (torch.norm(v1) + 1e-8)
+    dot = torch.clamp(torch.dot(v0_n, v1_n), -1.0, 1.0)
+    if abs(dot.item()) > threshold:
+        result = (1.0 - t) * v0 + t * v1
+    else:
+        theta = torch.acos(dot)
+        sin_theta = torch.sin(theta)
+        s0 = torch.sin((1.0 - t) * theta) / sin_theta
+        s1 = torch.sin(t * theta) / sin_theta
+        result = s0 * v0 + s1 * v1
+    return result.reshape(shape).to(c0.dtype)
+
+
+def mutate_conditioning_gaussian(
+    genotype: ConditioningGenotype, sigma: float
+) -> ConditioningGenotype:
+    """conditioning vector にガウスノイズを加えて突然変異させる。
+
+    注意: CLAP embedding は L2 正規化済みのため、ガウシアン加算は球面から外れる。
+    conditioning mode では mutate_conditioning_micro_slerp の使用を推奨。
+    """
+    mutant = genotype.clone()
+    mutant.embedding = mutant.embedding + torch.randn_like(mutant.embedding) * sigma
+    mutant.metadata["operation"] = "mutate_conditioning_gaussian"
+    mutant.metadata["sigma"] = sigma
+    return mutant
+
+
+def mutate_conditioning_micro_slerp(
+    genotype: ConditioningGenotype,
+    pool_embedding: torch.Tensor,
+    mu: Optional[float] = None,
+) -> ConditioningGenotype:
+    """Micro-SLERP 変異: 親 embedding をプール embedding の方向へわずかに動かす。
+
+    球面上に留まるため CLAP embedding の L2 正規化と整合する。
+    mu: 補間係数 (推奨 Uniform(0.05, 0.15))。小さいほど親の近傍に留まる。
+    pool_embedding: プロンプトプールからサンプルした CLAP embedding (1, 1, 512)
+    """
+    if mu is None:
+        mu = float(np.random.uniform(0.05, 0.15))
+    mutant = genotype.clone()
+    mutant.embedding = slerp_conditioning(genotype.embedding, pool_embedding, mu)
+    mutant.metadata.update({
+        "operation": "micro_slerp_mutate",
+        "mu": mu,
+    })
+    return mutant
+
+
+def crossover_conditioning_slerp(
+    parent1: ConditioningGenotype,
+    parent2: ConditioningGenotype,
+    alpha: Optional[float] = None,
+) -> ConditioningGenotype:
+    """2つの conditioning vector を SLERP で交叉する。"""
+    if alpha is None:
+        alpha = float(np.random.uniform(0.3, 0.7))
+    child = parent1.clone()
+    child.embedding = slerp_conditioning(parent1.embedding, parent2.embedding, alpha)
+    child.metadata.update({
+        "operation": "crossover_conditioning_slerp",
+        "crossover_alpha": alpha,
+        "parent1_id": parent1.id,
+        "parent2_id": parent2.id,
+    })
+    return child
+
+
 def adaptive_mutation_rate(generation: int, convergence_score: float = 0.0) -> float:
     """
     世代数と収束状況に応じて突然変異率を動的に調整
