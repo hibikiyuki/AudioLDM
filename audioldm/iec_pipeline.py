@@ -883,7 +883,7 @@ class AudioLDM_IEC:
     def initialize_population_conditioning(
         self,
         prompt: str,
-        slerp_alpha: float = 0.2,
+        slerp_alpha: float = 0.5,
         x_T_seed: Optional[int] = None,
         prompt_pool: Optional[List[str]] = None,
     ) -> List[Tuple[ConditioningGenotype, np.ndarray]]:
@@ -961,7 +961,7 @@ class AudioLDM_IEC:
         self,
         selected_indices: List[int],
         mutation_mu_range: Tuple[float, float] = (0.05, 0.15),
-        p_mut: float = 0.4,
+        p_mut: float = 0.5,
         elite_count: int = 2,
         random_sample_count: int = 1,
         prompt_pool: Optional[List[str]] = None,
@@ -1082,6 +1082,76 @@ class AudioLDM_IEC:
 
         waveforms = self._generate_audio_batch_conditioning(self.population.current_generation)
         return list(zip(self.population.current_generation, waveforms)), convergence_info
+
+    def generate_random_baseline_population(
+        self,
+        prompt: Optional[str] = None,
+        alpha_range: Tuple[float, float] = (0.3, 0.6),
+        prompt_pool: Optional[List[str]] = None,
+        x_T_seed: Optional[int] = None,
+    ) -> List[Tuple[ConditioningGenotype, np.ndarray]]:
+        """ランダム生成ベースライン（進化なし）。
+
+        Exp 5 のユーザスタディで IEC 駆動の進化と比較する対照条件として、
+        毎ラウンド独立にプールからプロンプトをサンプリングし新規個体群を生成する。
+        選択履歴・前世代の情報は一切参照しない（淘汰・交叉・変異を行わない）。
+
+        prompt が与えられた場合は SLERP B-2（base ↔ ランダムプロンプト, alpha~Uniform(*alpha_range)）
+        で意味的なアンカーを保ちつつ多様性を持たせる。prompt が None の場合は
+        プールのプロンプト embedding をそのまま用いる。
+        """
+        pool = prompt_pool or PROMPT_POOL
+
+        if x_T_seed is not None:
+            gen = torch.Generator(device=self.device).manual_seed(x_T_seed)
+            x_T = torch.randn((1,) + self.latent_shape, device=self.device, generator=gen)
+        else:
+            x_T = torch.randn((1,) + self.latent_shape, device=self.device)
+
+        if len(pool) >= self.population_size:
+            sampled_prompts = np.random.choice(pool, size=self.population_size, replace=False).tolist()
+        else:
+            sampled_prompts = list(np.random.permutation(pool))
+            while len(sampled_prompts) < self.population_size:
+                extra = np.random.choice(
+                    pool,
+                    size=min(len(pool), self.population_size - len(sampled_prompts)),
+                    replace=False,
+                ).tolist()
+                sampled_prompts.extend(extra)
+            sampled_prompts = sampled_prompts[:self.population_size]
+
+        c_base = self._encode_text_single(prompt) if prompt else None
+
+        genotypes: List[ConditioningGenotype] = []
+        for rand_prompt in sampled_prompts:
+            seed = int(np.random.randint(0, 2**32 - 1))
+            c_rand = self._encode_text_single(rand_prompt)
+            if c_base is not None:
+                alpha = float(np.random.uniform(*alpha_range))
+                embedding = slerp_conditioning(c_base, c_rand, alpha)
+            else:
+                alpha = None
+                embedding = c_rand.clone()
+            g = ConditioningGenotype(
+                embedding=embedding,
+                x_T=x_T,
+                source_prompt=rand_prompt,
+                seed=seed,
+                metadata={
+                    "ga_mode": "random_baseline",
+                    "initialization": "random_baseline",
+                    "operation": "random_baseline_sample",
+                    "base_prompt": prompt,
+                    "rand_prompt": rand_prompt,
+                    "slerp_alpha": alpha,
+                },
+            )
+            g.generation = 0
+            genotypes.append(g)
+
+        waveforms = self._generate_audio_batch_conditioning(genotypes)
+        return list(zip(genotypes, waveforms))
 
     def initialize_population_z0(
         self,

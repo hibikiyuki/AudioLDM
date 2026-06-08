@@ -195,7 +195,7 @@ def run_integration(model_name: str, target_prompt: str, n_gen: int) -> None:
 
     # プール CLAP embeddings を事前計算
     pool_prompts = sample_prompts(30, exclude=[base_prompt, target_prompt])
-    pool_embs = [pipeline._encode_text_single(p) for p in pool_prompts]
+    pool_embs = [pipeline._encode_text_single(p).cpu() for p in pool_prompts]
 
     all_results: list[RunResult] = []
 
@@ -277,7 +277,7 @@ def run_integration(model_name: str, target_prompt: str, n_gen: int) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Exp 1: Conditioning Variation 比較")
     parser.add_argument("--integration", action="store_true", help="実モデルを使用する統合テストを実行")
-    parser.add_argument("--model", default="audioldm-s-full", help="AudioLDM モデル名")
+    parser.add_argument("--model", default="audioldm-m-full", help="AudioLDM モデル名")
     parser.add_argument("--target", default="tense orchestral strings with brass fanfare",
                         help="ターゲット音声の説明プロンプト")
     parser.add_argument("--n-gen", type=int, default=N_GENERATIONS, help="世代数")

@@ -1,0 +1,302 @@
+[
+  {
+    "approach": "gaussian",
+    "param_name": "sigma",
+    "param_value": 0.1,
+    "target_prompt": "tense orchestral strings with brass fanfare",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "gaussian",
+        "param_name": "sigma",
+        "param_value": 0.1,
+        "max_fitness": 0.1714395135641098,
+        "mean_fitness": 0.08954983639220397,
+        "diversity": 0.8189732491970062,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "gaussian",
+        "param_name": "sigma",
+        "param_value": 0.1,
+        "max_fitness": 0.3130931854248047,
+        "mean_fitness": 0.20007401332259178,
+        "diversity": 0.2485967348019282,
+        "centroid_dist": 0.10029095411300659,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "gaussian",
+        "param_name": "sigma",
+        "param_value": 0.1,
+        "max_fitness": 0.6183353662490845,
+        "mean_fitness": 0.33442072321971256,
+        "diversity": 0.08473734060923259,
+        "centroid_dist": 0.06739246845245361,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "gaussian",
+        "param_name": "sigma",
+        "param_value": 0.1,
+        "max_fitness": 0.6631163954734802,
+        "mean_fitness": 0.50037648777167,
+        "diversity": 0.06029841899871826,
+        "centroid_dist": 0.06438392400741577,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "gaussian",
+        "param_name": "sigma",
+        "param_value": 0.1,
+        "max_fitness": 0.6631163954734802,
+        "mean_fitness": 0.6409063438574473,
+        "diversity": 0.07467348575592041,
+        "centroid_dist": 0.007238447666168213,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 5,
+        "approach": "gaussian",
+        "param_name": "sigma",
+        "param_value": 0.1,
+        "max_fitness": 0.6790862679481506,
+        "mean_fitness": 0.6615882019201914,
+        "diversity": 0.03639103968938192,
+        "centroid_dist": 0.001013636589050293,
+        "stagnant_streak": 2
+      },
+      {
+        "generation": 6,
+        "approach": "gaussian",
+        "param_name": "sigma",
+        "param_value": 0.1,
+        "max_fitness": 0.7248058915138245,
+        "mean_fitness": 0.6848557790120443,
+        "diversity": 0.0156043807665507,
+        "centroid_dist": 0.01234447956085205,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 7,
+        "approach": "gaussian",
+        "param_name": "sigma",
+        "param_value": 0.1,
+        "max_fitness": 0.7248058915138245,
+        "mean_fitness": 0.7133725682894388,
+        "diversity": 0.04441450039545695,
+        "centroid_dist": 0.002813100814819336,
+        "stagnant_streak": 1
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.7248058915138245,
+    "final_diversity": 0.04441450039545695
+  },
+  {
+    "approach": "slerp_random",
+    "param_name": "alpha",
+    "param_value": 0.3,
+    "target_prompt": "tense orchestral strings with brass fanfare",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_random",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.16374023258686066,
+        "mean_fitness": 0.15763737509648004,
+        "diversity": 0.20774728854497274,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_random",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.24580369889736176,
+        "mean_fitness": 0.18341735502084097,
+        "diversity": 0.06814176638921102,
+        "centroid_dist": 0.02143782377243042,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_random",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.39070749282836914,
+        "mean_fitness": 0.2569743370016416,
+        "diversity": 0.07652327617009481,
+        "centroid_dist": 0.05137908458709717,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_random",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.3992428183555603,
+        "mean_fitness": 0.3609230766693751,
+        "diversity": 0.10350542068481446,
+        "centroid_dist": 0.09337788820266724,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_random",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.4941781163215637,
+        "mean_fitness": 0.4321800669034322,
+        "diversity": 0.05961780945460002,
+        "centroid_dist": 0.032552361488342285,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_random",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.785780131816864,
+        "mean_fitness": 0.5497448245684305,
+        "diversity": 0.0678064227104187,
+        "centroid_dist": 0.05485790967941284,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_random",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.785780131816864,
+        "mean_fitness": 0.6849884688854218,
+        "diversity": 0.062445068359375,
+        "centroid_dist": 0.0156058669090271,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_random",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.785780131816864,
+        "mean_fitness": 0.7389680842558543,
+        "diversity": 0.02586847941080729,
+        "centroid_dist": 0.0015548467636108398,
+        "stagnant_streak": 1
+      }
+    ],
+    "converge_generation": 8,
+    "final_max_fitness": 0.785780131816864,
+    "final_diversity": 0.02586847941080729
+  },
+  {
+    "approach": "slerp_prompt",
+    "param_name": "alpha",
+    "param_value": 0.3,
+    "target_prompt": "tense orchestral strings with brass fanfare",
+    "n_generations": 8,
+    "generation_logs": [
+      {
+        "generation": 0,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.5065767765045166,
+        "mean_fitness": 0.39000870784123737,
+        "diversity": 0.10307739575703939,
+        "centroid_dist": -1.0,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 1,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.7952311635017395,
+        "mean_fitness": 0.5523475309213003,
+        "diversity": 0.05815428892771403,
+        "centroid_dist": 0.042200684547424316,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 2,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.7952311635017395,
+        "mean_fitness": 0.6631955901781718,
+        "diversity": 0.07297369639078775,
+        "centroid_dist": 0.05809366703033447,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 3,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.7952311635017395,
+        "mean_fitness": 0.7743582129478455,
+        "diversity": 0.05347335338592529,
+        "centroid_dist": 0.00695955753326416,
+        "stagnant_streak": 1
+      },
+      {
+        "generation": 4,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.7980551719665527,
+        "mean_fitness": 0.7885059316953024,
+        "diversity": 0.024463899930318198,
+        "centroid_dist": 2.765655517578125e-05,
+        "stagnant_streak": 2
+      },
+      {
+        "generation": 5,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.8009784817695618,
+        "mean_fitness": 0.7884540855884552,
+        "diversity": 0.035913081963857015,
+        "centroid_dist": 0.00363314151763916,
+        "stagnant_streak": 3
+      },
+      {
+        "generation": 6,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.8942036032676697,
+        "mean_fitness": 0.808285137017568,
+        "diversity": 0.02859997351964315,
+        "centroid_dist": 0.014768123626708984,
+        "stagnant_streak": 0
+      },
+      {
+        "generation": 7,
+        "approach": "slerp_prompt",
+        "param_name": "alpha",
+        "param_value": 0.3,
+        "max_fitness": 0.8942036032676697,
+        "mean_fitness": 0.854146937529246,
+        "diversity": 0.025322194894154867,
+        "centroid_dist": 0.01523292064666748,
+        "stagnant_streak": 0
+      }
+    ],
+    "converge_generation": 5,
+    "final_max_fitness": 0.8942036032676697,
+    "final_diversity": 0.025322194894154867
+  }
+]

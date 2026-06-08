@@ -50,9 +50,16 @@ class IECInterface:
         self.st_audio_paths: List[str] = []
         self.st_ranked_words: List[Tuple[str, float]] = []
 
+        # ランダム生成ベースライン（進化なし）用の状態（Exp 5 対照条件）
+        self.baseline_results: List[Tuple] = []
+        self.baseline_audio_paths: List[str] = []
+        self._baseline_round: int = 0
+
         # ログ
         self.interaction_log = []
-        
+        # 直近で個体群を提示した時刻（選好時間 = 提示〜次の選択操作までの経過時間の起点）
+        self._presented_at: Optional[datetime] = None
+
         print(f"セッションID: {self.session_id}")
         print(f"出力ディレクトリ: {self.session_dir}")
     
@@ -63,7 +70,7 @@ class IECInterface:
         ga_mode: str = "latent",
         transform_init_std: float = 0.3,
         base_noise_seed_str: str = "",
-        cond_slerp_alpha: float = 0.2,
+        cond_slerp_alpha: float = 0.5,
         cond_x_T_seed_str: str = "",
         progress=gr.Progress()
     ) -> Tuple[List, str, str]:
@@ -74,6 +81,7 @@ class IECInterface:
             (音声リスト, 情報テキスト, ステータスメッセージ)
         """
         progress(0, desc="初期個体群を生成中...")
+        compute_started_at = datetime.now()
 
         try:
             # 変換行列モード用パラメータを反映
@@ -130,15 +138,20 @@ class IECInterface:
                 prefix=f"gen{self.iec_system.population.generation_number:03d}"
             )
             
-            # ログに記録
+            # ログに記録（生成所要時間を計測）
+            presented_at = datetime.now()
+            compute_seconds = (presented_at - compute_started_at).total_seconds()
             self.interaction_log.append({
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": presented_at.isoformat(),
                 "action": "initialize",
                 "prompt": prompt,
                 "generation": self.iec_system.population.generation_number,
-                "population_size": len(self.current_results)
+                "population_size": len(self.current_results),
+                "compute_seconds": compute_seconds,
             })
-            
+            # 次の選択操作までの選好時間計測の起点を記録
+            self._presented_at = presented_at
+
             progress(1.0, desc="完了!")
             
             # 音声コンポーネント用のリストを作成
@@ -165,7 +178,7 @@ class IECInterface:
         fresh_count: int = 1,
         crossover_mode: str = "z0",
         sdedit_strength: float = 0.0,
-        p_mut: float = 0.4,
+        p_mut: float = 0.5,
         mutation_mu_max: float = 0.10,
         random_sample_count: int = 1,
         progress=gr.Progress()
@@ -177,11 +190,19 @@ class IECInterface:
         """
         progress(0, desc="選択を確認中...")
 
+        # 選好時間: 前世代の提示〜本選択操作までの経過時間
+        selection_clicked_at = datetime.now()
+        selection_seconds = (
+            (selection_clicked_at - self._presented_at).total_seconds()
+            if self._presented_at is not None else None
+        )
+
         if not selected_checkboxes or len(selected_checkboxes) == 0:
             return (self.current_audio_paths, self._get_generation_info(),
                     "少なくとも1つの個体を選択してください", "")
 
         convergence_text = ""
+        compute_started_at = datetime.now()
         try:
             progress(0.2, desc=f"{len(selected_checkboxes)}個の親個体から次世代を生成中...")
 
@@ -213,8 +234,10 @@ class IECInterface:
                 prefix=f"gen{self.iec_system.population.generation_number:03d}"
             )
 
+            presented_at = datetime.now()
+            compute_seconds = (presented_at - compute_started_at).total_seconds()
             self.interaction_log.append({
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": presented_at.isoformat(),
                 "action": "evolve",
                 "selected_indices": selected_checkboxes,
                 "generation": self.iec_system.population.generation_number,
@@ -227,7 +250,13 @@ class IECInterface:
                 "p_mut": p_mut,
                 "mutation_mu_max": mutation_mu_max,
                 "random_sample_count": random_sample_count,
+                # 選好時間: 前世代の提示〜本選択操作までの経過秒数（聴取・比較・選択に要した時間）
+                "selection_seconds": selection_seconds,
+                # 世代生成所要時間: ボタン押下〜音声提示までの計算時間（待ち時間の評価用）
+                "compute_seconds": compute_seconds,
             })
+            # 次の選好時間計測の起点を更新
+            self._presented_at = presented_at
 
             progress(1.0, desc="完了!")
 
@@ -258,6 +287,67 @@ class IECInterface:
             lines.append(f"重心変化: {d:.4f} | 集団多様性: {div:.4f}")
         return "\n\n".join(lines)
     
+    def generate_random_baseline(
+        self,
+        prompt: str,
+        progress=gr.Progress()
+    ) -> Tuple[List, str, str]:
+        """ランダム生成ベースライン（進化なし）の1ラウンドを生成する。
+
+        Exp 5 の対照条件用インターフェース: 選択履歴・前ラウンドの情報を一切
+        参照せず、毎回プロンプトプールから独立にサンプリングして音声を生成する。
+        IEC 駆動の進化（選択→淘汰→交叉→変異）と比較するためのベースライン。
+
+        Returns:
+            (音声リスト, 情報テキスト, ステータスメッセージ)
+        """
+        progress(0, desc="ランダム個体群を生成中...")
+        compute_started_at = datetime.now()
+        self._baseline_round += 1
+
+        try:
+            effective_prompt = prompt.strip() if prompt.strip() else None
+            self.baseline_results = self.iec_system.generate_random_baseline_population(
+                prompt=effective_prompt,
+            )
+
+            progress(0.7, desc="音声を保存中...")
+            self.baseline_audio_paths = self.iec_system.save_generation_audio(
+                self.baseline_results,
+                output_dir=self.session_dir,
+                prefix=f"baseline{self._baseline_round:03d}",
+            )
+
+            presented_at = datetime.now()
+            compute_seconds = (presented_at - compute_started_at).total_seconds()
+            self.interaction_log.append({
+                "timestamp": presented_at.isoformat(),
+                "action": "random_baseline",
+                "prompt": prompt,
+                "round": self._baseline_round,
+                "population_size": len(self.baseline_results),
+                "compute_seconds": compute_seconds,
+            })
+
+            progress(1.0, desc="完了!")
+            audio_list = [path for path in self.baseline_audio_paths]
+            info = (
+                "### 📊 ベースライン情報\n\n"
+                f"- **ラウンド**: {self._baseline_round}\n"
+                f"- **個体数**: {len(self.baseline_results)}\n"
+                f"- **セッションID**: {self.session_id}\n"
+                "- *進化機構は使用しません。各ラウンドはプールからの独立サンプリングです*"
+            )
+            message = f"🎲 ランダム個体群（ラウンド {self._baseline_round}）を生成しました（進化なし・ベースライン）"
+            return audio_list, info, message
+
+        except Exception as e:
+            error_msg = f"エラーが発生しました: {str(e)}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            return self.baseline_audio_paths, "", error_msg
+
     def rollback_generation(self, steps: int = 1) -> Tuple[List, str, str]:
         """
         指定世代数だけ戻る
@@ -285,7 +375,9 @@ class IECInterface:
                 "steps": steps,
                 "generation": self.iec_system.population.generation_number
             })
-            
+            # ロールバックで再提示された個体群を選好時間計測の起点とする
+            self._presented_at = datetime.now()
+
             audio_list = [path for path in self.current_audio_paths]
             info = self._get_generation_info()
             message = f"🔙 第{self.iec_system.population.generation_number}世代にロールバックしました"
@@ -423,6 +515,12 @@ class IECInterface:
             if init == "slerp_prompt":
                 lines.append(f"🎲 B-2 SLERP初期化")
                 lines.append(f"　α={alpha:.2f}  ランダム: {rand_prompt[:30]}")
+            elif init == "random_baseline":
+                lines.append("🎲 ランダム生成（進化なし・ベースライン）")
+                if base_prompt:
+                    lines.append(f"　α={alpha:.2f}  ランダム: {rand_prompt[:30]}")
+                else:
+                    lines.append(f"　プロンプト: {rand_prompt[:30]}")
             elif op == "crossover_conditioning_slerp":
                 p1_idx = _fmt_pop_idx(meta.get("crossover_parent1_pop_index"))
                 p2_idx = _fmt_pop_idx(meta.get("crossover_parent2_pop_index"))
@@ -629,9 +727,9 @@ def create_gradio_interface(
                                 )
                             with gr.Group(visible=False) as conditioning_init_group:
                                 cond_slerp_alpha_slider = gr.Slider(
-                                    minimum=0.0, maximum=0.5, value=0.2, step=0.01,
+                                    minimum=0.0, maximum=0.7, value=0.5, step=0.01,
                                     label="初期多様性 α (B-2 SLERP強度)",
-                                    info="0=全個体が同一, 0.2=推奨, 0.3以上=意味が大きく変化"
+                                    info="0=全個体が同一, 0.5=推奨（実験で最良の収束を確認）, 0.7以上=base prompt の意味が薄れる"
                                 )
                                 cond_x_T_seed_input = gr.Textbox(
                                     label="固定ノイズ x_T の seed (空欄でランダム)",
@@ -652,9 +750,9 @@ def create_gradio_interface(
                             with gr.Group() as conditioning_evo_group:
                                 gr.Markdown("**Conditioning モード専用**")
                                 p_mut_slider = gr.Slider(
-                                    minimum=0.0, maximum=1.0, value=0.4, step=0.05,
+                                    minimum=0.0, maximum=1.0, value=0.5, step=0.05,
                                     label="変異適用確率 p_mut (Conditioning モード)",
-                                    info="交叉後の個体に Micro-SLERP 変異を適用する確率"
+                                    info="交叉後の個体に Micro-SLERP 変異を適用する確率（0.5=推奨、実験で停滞抑制効果を確認）"
                                 )
                                 mutation_mu_slider = gr.Slider(
                                     minimum=0.01, maximum=0.25, value=0.10, step=0.01,
@@ -921,6 +1019,76 @@ def create_gradio_interface(
                     inputs=[st_selection_group, st_mutation_noise, st_mutation_gs,
                             st_mutation_mask, st_elite_count],
                     outputs=st_all_outputs
+                )
+
+            # ===== ベースライン比較タブ（Exp 5 対照条件: ランダム生成・進化なし） =====
+            with gr.Tab("ベースライン比較"):
+                gr.Markdown("""
+                ### 🎲 ランダム生成ベースライン（進化なし）
+                このタブでは IEC の進化機構（選択・淘汰・交叉・変異）を一切使用せず、
+                ボタンを押すたびにプロンプトプールから独立に新しい音声候補を生成します。
+                Exp 5（ユーザスタディ）で「進化あり」条件と比較する対照条件として使用してください。
+                """)
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        with gr.Group():
+                            gr.Markdown("### 🚀 生成")
+                            baseline_prompt_input = gr.Textbox(
+                                label="ベースプロンプト (空欄で完全ランダム)",
+                                placeholder="例: music",
+                                value=""
+                            )
+                            baseline_generate_button = gr.Button(
+                                "🎲 ランダム個体群を生成（進化なし）", variant="primary", size="lg")
+
+                    with gr.Column(scale=1):
+                        baseline_info_display = gr.Markdown("### 📊 情報\n準備中...")
+                        baseline_status_display = gr.Textbox(
+                            label="ステータス", value="ボタンを押してランダム生成を開始してください",
+                            interactive=False
+                        )
+
+                gr.Markdown("### 🎧 個体群 (聴き比べてください。選択操作は不要です)")
+                baseline_audio_components = []
+                baseline_status_components = []
+                with gr.Row():
+                    for i in range(population_size):
+                        with gr.Column():
+                            b_audio = gr.Audio(label=f"個体 {i}", type="filepath", interactive=False)
+                            b_status = gr.Textbox(
+                                value="", label="生成元", interactive=False, lines=3, max_lines=4)
+                            baseline_audio_components.append(b_audio)
+                            baseline_status_components.append(b_status)
+
+                def _get_baseline_status_list():
+                    statuses = []
+                    for i in range(population_size):
+                        if i < len(interface.baseline_results):
+                            genotype = interface.baseline_results[i][0]
+                            statuses.append(IECInterface._get_individual_status(genotype, i))
+                        else:
+                            statuses.append("")
+                    return statuses
+
+                def _pack_baseline_outputs(audio_list, info, message):
+                    audio_outputs = audio_list + [None] * (population_size - len(audio_list))
+                    status_outputs = _get_baseline_status_list()
+                    return [info, message] + audio_outputs + status_outputs
+
+                def baseline_generate_wrapper(prompt):
+                    audio_list, info, message = interface.generate_random_baseline(prompt)
+                    return _pack_baseline_outputs(audio_list, info, message)
+
+                baseline_all_outputs = (
+                    [baseline_info_display, baseline_status_display]
+                    + baseline_audio_components
+                    + baseline_status_components
+                )
+
+                baseline_generate_button.click(
+                    fn=baseline_generate_wrapper,
+                    inputs=[baseline_prompt_input],
+                    outputs=baseline_all_outputs
                 )
 
     return demo

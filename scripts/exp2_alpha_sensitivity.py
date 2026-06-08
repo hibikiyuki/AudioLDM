@@ -165,7 +165,7 @@ def run_integration(model_name: str, target_prompt: str, n_gen: int) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Exp 2: α 感度分析")
     parser.add_argument("--integration", action="store_true")
-    parser.add_argument("--model", default="audioldm-s-full")
+    parser.add_argument("--model", default="audioldm-m-full")
     parser.add_argument("--target", default="gentle piano melody with soft strings")
     parser.add_argument("--n-gen", type=int, default=N_GENERATIONS)
     args = parser.parse_args()

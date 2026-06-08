@@ -188,7 +188,7 @@ def run_integration(model_name: str, target_prompt: str, n_gen: int) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Exp 4: 世代構成比率の比較")
     parser.add_argument("--integration", action="store_true")
-    parser.add_argument("--model", default="audioldm-s-full")
+    parser.add_argument("--model", default="audioldm-m-full")
     parser.add_argument("--target", default="peaceful forest ambience with birds")
     parser.add_argument("--n-gen", type=int, default=N_GENERATIONS)
     args = parser.parse_args()
