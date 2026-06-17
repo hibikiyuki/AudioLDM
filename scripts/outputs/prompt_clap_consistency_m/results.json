@@ -1,0 +1,1262 @@
+[
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "banjo folk melody",
+    "scores": [
+      0.4960927665233612,
+      0.35392647981643677
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__banjo_folk_melody__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__banjo_folk_melody__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "bright and cheerful ukulele melody",
+    "scores": [
+      0.41871342062950134,
+      0.43057945370674133
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__bright_and_cheerful_ukulele_melody__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__bright_and_cheerful_ukulele_melody__s1.wav"
+    ]
+  },
+  {
+    "category": "TEXTURES",
+    "prompt": "staccato rhythmic music",
+    "scores": [
+      0.4089612066745758,
+      0.44005945324897766
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__staccato_rhythmic_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__staccato_rhythmic_music__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "dark trip hop beat with heavy bass",
+    "scores": [
+      0.3813074827194214,
+      0.46750831604003906
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__dark_trip_hop_beat_with_heavy_bass__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__dark_trip_hop_beat_with_heavy_bass__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "ambient soundscape",
+    "scores": [
+      0.4340614378452301,
+      0.40614452958106995
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__ambient_soundscape__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__ambient_soundscape__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "gentle lullaby with music box melody",
+    "scores": [
+      0.43263113498687744,
+      0.40715593099594116
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__gentle_lullaby_with_music_box_melody__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__gentle_lullaby_with_music_box_melody__s1.wav"
+    ]
+  },
+  {
+    "category": "ENVIRONMENTS",
+    "prompt": "outer space ambient sounds",
+    "scores": [
+      0.4144269824028015,
+      0.4031473994255066
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__outer_space_ambient_sounds__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__outer_space_ambient_sounds__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "aggressive electronic beat with heavy bass",
+    "scores": [
+      0.3827419579029083,
+      0.4277315139770508
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__aggressive_electronic_beat_with_heavy_ba__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__aggressive_electronic_beat_with_heavy_ba__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "new age ambient music",
+    "scores": [
+      0.38987839221954346,
+      0.41098010540008545
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__new_age_ambient_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__new_age_ambient_music__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "triumphant and majestic music",
+    "scores": [
+      0.42410117387771606,
+      0.3712448477745056
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__triumphant_and_majestic_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__triumphant_and_majestic_music__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "emotional violin solo with orchestra",
+    "scores": [
+      0.4397803843021393,
+      0.3508117198944092
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__emotional_violin_solo_with_orchestra__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__emotional_violin_solo_with_orchestra__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "reggae rhythm",
+    "scores": [
+      0.32944750785827637,
+      0.4566875100135803
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__reggae_rhythm__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__reggae_rhythm__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "lofi hip hop",
+    "scores": [
+      0.3712201714515686,
+      0.4083906412124634
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__lofi_hip_hop__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__lofi_hip_hop__s1.wav"
+    ]
+  },
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "solo piano melody",
+    "scores": [
+      0.3752036690711975,
+      0.4017491042613983
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__solo_piano_melody__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__solo_piano_melody__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "delicate harp arpeggio with strings",
+    "scores": [
+      0.37897831201553345,
+      0.3954539895057678
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__delicate_harp_arpeggio_with_strings__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__delicate_harp_arpeggio_with_strings__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "pulsating techno synthesizer with kick drum",
+    "scores": [
+      0.3379114866256714,
+      0.43086981773376465
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__pulsating_techno_synthesizer_with_kick_d__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__pulsating_techno_synthesizer_with_kick_d__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "classical orchestral music",
+    "scores": [
+      0.42178967595100403,
+      0.34487760066986084
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__classical_orchestral_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__classical_orchestral_music__s1.wav"
+    ]
+  },
+  {
+    "category": "TEXTURES",
+    "prompt": "bright and shimmering music",
+    "scores": [
+      0.36177268624305725,
+      0.4035409688949585
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__bright_and_shimmering_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__bright_and_shimmering_music__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "baroque music",
+    "scores": [
+      0.3297298550605774,
+      0.4278183579444885
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__baroque_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__baroque_music__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "mysterious and eerie soundscape",
+    "scores": [
+      0.34636300802230835,
+      0.40854817628860474
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__mysterious_and_eerie_soundscape__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__mysterious_and_eerie_soundscape__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "tense thriller music with staccato strings",
+    "scores": [
+      0.35702797770500183,
+      0.39118707180023193
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__tense_thriller_music_with_staccato_strin__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__tense_thriller_music_with_staccato_strin__s1.wav"
+    ]
+  },
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "harp arpeggio",
+    "scores": [
+      0.4021962881088257,
+      0.3434310555458069
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__harp_arpeggio__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__harp_arpeggio__s1.wav"
+    ]
+  },
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "flute melody",
+    "scores": [
+      0.35695207118988037,
+      0.3764113187789917
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__flute_melody__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__flute_melody__s1.wav"
+    ]
+  },
+  {
+    "category": "TEXTURES",
+    "prompt": "warm and mellow music",
+    "scores": [
+      0.39146438241004944,
+      0.339639276266098
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__warm_and_mellow_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__warm_and_mellow_music__s1.wav"
+    ]
+  },
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "saxophone jazz improvisation",
+    "scores": [
+      0.35715723037719727,
+      0.3706972002983093
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__saxophone_jazz_improvisation__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__saxophone_jazz_improvisation__s1.wav"
+    ]
+  },
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "oboe classical melody",
+    "scores": [
+      0.26166287064552307,
+      0.4585575461387634
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__oboe_classical_melody__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__oboe_classical_melody__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "dark orchestral tension with low brass",
+    "scores": [
+      0.3048403561115265,
+      0.40646395087242126
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__dark_orchestral_tension_with_low_brass__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__dark_orchestral_tension_with_low_brass__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "mysterious ambient synthesizer pad",
+    "scores": [
+      0.34892213344573975,
+      0.3593140244483948
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__mysterious_ambient_synthesizer_pad__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__mysterious_ambient_synthesizer_pad__s1.wav"
+    ]
+  },
+  {
+    "category": "ENVIRONMENTS",
+    "prompt": "crackling fire",
+    "scores": [
+      0.37133124470710754,
+      0.3343544006347656
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__crackling_fire__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__crackling_fire__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "eerie theremin melody with strings",
+    "scores": [
+      0.3401497006416321,
+      0.36283421516418457
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__eerie_theremin_melody_with_strings__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__eerie_theremin_melody_with_strings__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "ethereal and dreamy soundscape",
+    "scores": [
+      0.3894636034965515,
+      0.30670514702796936
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__ethereal_and_dreamy_soundscape__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__ethereal_and_dreamy_soundscape__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "drum and bass music",
+    "scores": [
+      0.3643869161605835,
+      0.3199450373649597
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__drum_and_bass_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__drum_and_bass_music__s1.wav"
+    ]
+  },
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "french horn fanfare",
+    "scores": [
+      0.35045957565307617,
+      0.33190053701400757
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__french_horn_fanfare__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__french_horn_fanfare__s1.wav"
+    ]
+  },
+  {
+    "category": "TEXTURES",
+    "prompt": "legato flowing music",
+    "scores": [
+      0.3087332844734192,
+      0.37240898609161377
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__legato_flowing_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__legato_flowing_music__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "tense and suspenseful music",
+    "scores": [
+      0.3550058603286743,
+      0.3253464102745056
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__tense_and_suspenseful_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__tense_and_suspenseful_music__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "atmospheric dark jazz with muted trumpet",
+    "scores": [
+      0.354525089263916,
+      0.32554367184638977
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__atmospheric_dark_jazz_with_muted_trumpet__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__atmospheric_dark_jazz_with_muted_trumpet__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "distorted electric guitar power chords",
+    "scores": [
+      0.4001956880092621,
+      0.27708011865615845
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__distorted_electric_guitar_power_chords__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__distorted_electric_guitar_power_chords__s1.wav"
+    ]
+  },
+  {
+    "category": "TEXTURES",
+    "prompt": "lo-fi degraded audio",
+    "scores": [
+      0.2884769141674042,
+      0.3883289098739624
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__lo_fi_degraded_audio__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__lo_fi_degraded_audio__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "anxious and unsettling music",
+    "scores": [
+      0.37638115882873535,
+      0.29822736978530884
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__anxious_and_unsettling_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__anxious_and_unsettling_music__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "gentle piano melody with soft strings",
+    "scores": [
+      0.3285834789276123,
+      0.34405189752578735
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__gentle_piano_melody_with_soft_strings__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__gentle_piano_melody_with_soft_strings__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "epic cinematic orchestra with choir",
+    "scores": [
+      0.308746337890625,
+      0.3546767234802246
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__epic_cinematic_orchestra_with_choir__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__epic_cinematic_orchestra_with_choir__s1.wav"
+    ]
+  },
+  {
+    "category": "TEXTURES",
+    "prompt": "reverberant echoing music",
+    "scores": [
+      0.29696792364120483,
+      0.35357004404067993
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__reverberant_echoing_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__reverberant_echoing_music__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "melancholic piano melody with ambient strings",
+    "scores": [
+      0.3886041045188904,
+      0.2551230192184448
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__melancholic_piano_melody_with_ambient_st__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__melancholic_piano_melody_with_ambient_st__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "techno music",
+    "scores": [
+      0.3465903401374817,
+      0.2967677116394043
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__techno_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__techno_music__s1.wav"
+    ]
+  },
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "marimba percussion",
+    "scores": [
+      0.2997022867202759,
+      0.3427393436431885
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__marimba_percussion__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__marimba_percussion__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "slow and sorrowful piano ballad",
+    "scores": [
+      0.3562726378440857,
+      0.28300854563713074
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__slow_and_sorrowful_piano_ballad__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__slow_and_sorrowful_piano_ballad__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "driving synthesizer arpeggio with drum machine",
+    "scores": [
+      0.2881292700767517,
+      0.34575653076171875
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__driving_synthesizer_arpeggio_with_drum_m__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__driving_synthesizer_arpeggio_with_drum_m__s1.wav"
+    ]
+  },
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "violin string melody",
+    "scores": [
+      0.3025021553039551,
+      0.3299110233783722
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__violin_string_melody__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__violin_string_melody__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "jazz improvisation",
+    "scores": [
+      0.32350414991378784,
+      0.2997955083847046
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__jazz_improvisation__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__jazz_improvisation__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "melancholic and reflective music",
+    "scores": [
+      0.33536529541015625,
+      0.28263014554977417
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__melancholic_and_reflective_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__melancholic_and_reflective_music__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "aggressive and intense music",
+    "scores": [
+      0.28484413027763367,
+      0.33112597465515137
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__aggressive_and_intense_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__aggressive_and_intense_music__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "full orchestral arrangement",
+    "scores": [
+      0.31142857670783997,
+      0.3016921877861023
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__full_orchestral_arrangement__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__full_orchestral_arrangement__s1.wav"
+    ]
+  },
+  {
+    "category": "ENVIRONMENTS",
+    "prompt": "forest nature ambience",
+    "scores": [
+      0.34974178671836853,
+      0.2592938244342804
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__forest_nature_ambience__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__forest_nature_ambience__s1.wav"
+    ]
+  },
+  {
+    "category": "TEXTURES",
+    "prompt": "dark and heavy music",
+    "scores": [
+      0.31223076581954956,
+      0.29666125774383545
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__dark_and_heavy_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__dark_and_heavy_music__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "haunting minor key string quartet",
+    "scores": [
+      0.24358364939689636,
+      0.36364877223968506
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__haunting_minor_key_string_quartet__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__haunting_minor_key_string_quartet__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "energetic rock guitar with drums",
+    "scores": [
+      0.32731005549430847,
+      0.2758505642414093
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__energetic_rock_guitar_with_drums__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__energetic_rock_guitar_with_drums__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "electronic dance music",
+    "scores": [
+      0.2683688700199127,
+      0.3325421214103699
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__electronic_dance_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__electronic_dance_music__s1.wav"
+    ]
+  },
+  {
+    "category": "TEXTURES",
+    "prompt": "layered and lush orchestration",
+    "scores": [
+      0.3204840421676636,
+      0.2747265696525574
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__layered_and_lush_orchestration__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__layered_and_lush_orchestration__s1.wav"
+    ]
+  },
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "pipe organ music",
+    "scores": [
+      0.3310624361038208,
+      0.26054146885871887
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__pipe_organ_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__pipe_organ_music__s1.wav"
+    ]
+  },
+  {
+    "category": "TEXTURES",
+    "prompt": "glitchy electronic music",
+    "scores": [
+      0.3766166567802429,
+      0.2063719928264618
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__glitchy_electronic_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__glitchy_electronic_music__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "dark and ominous music",
+    "scores": [
+      0.28132596611976624,
+      0.3008502721786499
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__dark_and_ominous_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__dark_and_ominous_music__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "fast-paced electronic dance track",
+    "scores": [
+      0.3272917866706848,
+      0.24908775091171265
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__fast_paced_electronic_dance_track__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__fast_paced_electronic_dance_track__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "funky bass groove with brass section",
+    "scores": [
+      0.33082252740859985,
+      0.2376025915145874
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__funky_bass_groove_with_brass_section__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__funky_bass_groove_with_brass_section__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "calm acoustic guitar with light percussion",
+    "scores": [
+      0.2973930239677429,
+      0.25839656591415405
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__calm_acoustic_guitar_with_light_percussi__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__calm_acoustic_guitar_with_light_percussi__s1.wav"
+    ]
+  },
+  {
+    "category": "ENVIRONMENTS",
+    "prompt": "waterfall sounds",
+    "scores": [
+      0.25992584228515625,
+      0.2943844199180603
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__waterfall_sounds__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__waterfall_sounds__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "hip hop beat",
+    "scores": [
+      0.2918354570865631,
+      0.2593330144882202
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__hip_hop_beat__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__hip_hop_beat__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "sad melancholic melody",
+    "scores": [
+      0.2683682143688202,
+      0.2798023223876953
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__sad_melancholic_melody__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__sad_melancholic_melody__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "happy upbeat music",
+    "scores": [
+      0.30074363946914673,
+      0.23996910452842712
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__happy_upbeat_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__happy_upbeat_music__s1.wav"
+    ]
+  },
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "trumpet fanfare",
+    "scores": [
+      0.3210146725177765,
+      0.21793876588344574
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__trumpet_fanfare__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__trumpet_fanfare__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "trip hop beat",
+    "scores": [
+      0.2684827148914337,
+      0.27038320899009705
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__trip_hop_beat__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__trip_hop_beat__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "dramatic and cinematic music",
+    "scores": [
+      0.2509997487068176,
+      0.28176069259643555
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__dramatic_and_cinematic_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__dramatic_and_cinematic_music__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "playful and whimsical melody",
+    "scores": [
+      0.2883973717689514,
+      0.24238687753677368
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__playful_and_whimsical_melody__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__playful_and_whimsical_melody__s1.wav"
+    ]
+  },
+  {
+    "category": "TEXTURES",
+    "prompt": "dry and intimate recording",
+    "scores": [
+      0.2835609018802643,
+      0.24446620047092438
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__dry_and_intimate_recording__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__dry_and_intimate_recording__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "deep meditative drone with bells",
+    "scores": [
+      0.18584774434566498,
+      0.3353254497051239
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__deep_meditative_drone_with_bells__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__deep_meditative_drone_with_bells__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "nostalgic and wistful tune",
+    "scores": [
+      0.2931850850582123,
+      0.22482869029045105
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__nostalgic_and_wistful_tune__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__nostalgic_and_wistful_tune__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "romantic and tender music",
+    "scores": [
+      0.2551555037498474,
+      0.26129278540611267
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__romantic_and_tender_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__romantic_and_tender_music__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "serene and tranquil music",
+    "scores": [
+      0.2508513927459717,
+      0.25811222195625305
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__serene_and_tranquil_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__serene_and_tranquil_music__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "synthwave music",
+    "scores": [
+      0.27896225452423096,
+      0.2293611466884613
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__synthwave_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__synthwave_music__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "upbeat jazz with saxophone and piano",
+    "scores": [
+      0.31157416105270386,
+      0.19548168778419495
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__upbeat_jazz_with_saxophone_and_piano__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__upbeat_jazz_with_saxophone_and_piano__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "hopeful and uplifting music",
+    "scores": [
+      0.2786158323287964,
+      0.2187734842300415
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__hopeful_and_uplifting_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__hopeful_and_uplifting_music__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "blues music",
+    "scores": [
+      0.2855690121650696,
+      0.20832017064094543
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__blues_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__blues_music__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "big band jazz",
+    "scores": [
+      0.31173861026763916,
+      0.17121320962905884
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__big_band_jazz__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__big_band_jazz__s1.wav"
+    ]
+  },
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "bass guitar groove",
+    "scores": [
+      0.19764649868011475,
+      0.28141188621520996
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__bass_guitar_groove__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__bass_guitar_groove__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "bossa nova",
+    "scores": [
+      0.2865322232246399,
+      0.1905699223279953
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__bossa_nova__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__bossa_nova__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "upbeat marimba ensemble with bass",
+    "scores": [
+      0.21030211448669434,
+      0.26416733860969543
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__upbeat_marimba_ensemble_with_bass__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__upbeat_marimba_ensemble_with_bass__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "folk acoustic music",
+    "scores": [
+      0.2522434592247009,
+      0.21678048372268677
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__folk_acoustic_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__folk_acoustic_music__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "cinematic film score",
+    "scores": [
+      0.19666630029678345,
+      0.2661128342151642
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__cinematic_film_score__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__cinematic_film_score__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "warm jazz piano trio with bass and drums",
+    "scores": [
+      0.21919113397598267,
+      0.23199835419654846
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__warm_jazz_piano_trio_with_bass_and_drums__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__warm_jazz_piano_trio_with_bass_and_drums__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "experimental avant-garde music",
+    "scores": [
+      0.22058963775634766,
+      0.23016107082366943
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__experimental_avant_garde_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__experimental_avant_garde_music__s1.wav"
+    ]
+  },
+  {
+    "category": "ENVIRONMENTS",
+    "prompt": "ocean waves crashing",
+    "scores": [
+      0.21647877991199493,
+      0.2285935878753662
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__ocean_waves_crashing__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__ocean_waves_crashing__s1.wav"
+    ]
+  },
+  {
+    "category": "TEXTURES",
+    "prompt": "cold and distant music",
+    "scores": [
+      0.2403436303138733,
+      0.19709807634353638
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__cold_and_distant_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__cold_and_distant_music__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "peaceful and calm ambient music",
+    "scores": [
+      0.21362951397895813,
+      0.2165803611278534
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__peaceful_and_calm_ambient_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__peaceful_and_calm_ambient_music__s1.wav"
+    ]
+  },
+  {
+    "category": "TEXTURES",
+    "prompt": "rich and full-bodied music",
+    "scores": [
+      0.22479510307312012,
+      0.19970229268074036
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__rich_and_full_bodied_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/TEXTURES__rich_and_full_bodied_music__s1.wav"
+    ]
+  },
+  {
+    "category": "EMOTION_MOOD",
+    "prompt": "energetic and powerful music",
+    "scores": [
+      0.2458953559398651,
+      0.17837661504745483
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__energetic_and_powerful_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/EMOTION_MOOD__energetic_and_powerful_music__s1.wav"
+    ]
+  },
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "synthesizer pad",
+    "scores": [
+      0.2219066619873047,
+      0.20151203870773315
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__synthesizer_pad__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__synthesizer_pad__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "soft and intimate acoustic guitar solo",
+    "scores": [
+      0.21874046325683594,
+      0.17038443684577942
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__soft_and_intimate_acoustic_guitar_solo__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__soft_and_intimate_acoustic_guitar_solo__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "country music",
+    "scores": [
+      0.1713734269142151,
+      0.18887601792812347
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__country_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__country_music__s1.wav"
+    ]
+  },
+  {
+    "category": "COMPOUND_PHRASES",
+    "prompt": "jubilant fanfare with brass and timpani",
+    "scores": [
+      0.09830331802368164,
+      0.26017212867736816
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__jubilant_fanfare_with_brass_and_timpani__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/COMPOUND_PHRASES__jubilant_fanfare_with_brass_and_timpani__s1.wav"
+    ]
+  },
+  {
+    "category": "ENVIRONMENTS",
+    "prompt": "thunderstorm sounds",
+    "scores": [
+      0.26833051443099976,
+      0.08115704357624054
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__thunderstorm_sounds__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__thunderstorm_sounds__s1.wav"
+    ]
+  },
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "electric guitar riff",
+    "scores": [
+      0.14673031866550446,
+      0.20040038228034973
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__electric_guitar_riff__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__electric_guitar_riff__s1.wav"
+    ]
+  },
+  {
+    "category": "GENRES",
+    "prompt": "rock music",
+    "scores": [
+      0.1597152203321457,
+      0.1859315037727356
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__rock_music__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/GENRES__rock_music__s1.wav"
+    ]
+  },
+  {
+    "category": "ENVIRONMENTS",
+    "prompt": "desert wind ambience",
+    "scores": [
+      0.15110251307487488,
+      0.1696811020374298
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__desert_wind_ambience__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__desert_wind_ambience__s1.wav"
+    ]
+  },
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "drum kit rhythm",
+    "scores": [
+      0.17972363531589508,
+      0.1306101679801941
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__drum_kit_rhythm__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__drum_kit_rhythm__s1.wav"
+    ]
+  },
+  {
+    "category": "INSTRUMENTS",
+    "prompt": "choir vocals",
+    "scores": [
+      0.12906861305236816,
+      0.12736615538597107
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__choir_vocals__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/INSTRUMENTS__choir_vocals__s1.wav"
+    ]
+  },
+  {
+    "category": "ENVIRONMENTS",
+    "prompt": "wind blowing through trees",
+    "scores": [
+      0.23525363206863403,
+      -0.03832536190748215
+    ],
+    "audio_paths": [
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__wind_blowing_through_trees__s0.wav",
+      "scripts/outputs/prompt_clap_consistency_m/audio/ENVIRONMENTS__wind_blowing_through_trees__s1.wav"
+    ]
+  }
+]

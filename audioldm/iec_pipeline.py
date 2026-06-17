@@ -9,6 +9,7 @@ import soundfile as sf
 import torchaudio
 from typing import List, Optional, Tuple, Dict
 import os
+import random
 
 from audioldm.pipeline import build_model, duration_to_latent_t_size
 from audioldm.latent_diffusion.ddim import DDIMSampler
@@ -21,6 +22,7 @@ from audioldm.iec import (
     StyleTransferGenotype, crossover_style_transfer, mutate_style_transfer,
     ConditioningGenotype, slerp_conditioning, mutate_conditioning_gaussian,
     mutate_conditioning_micro_slerp, crossover_conditioning_slerp,
+    sample_random_unit_embedding,
     STYLE_WORD_BANK,
 )
 from audioldm.prompt_pool import PROMPT_POOL, sample_prompts
@@ -65,6 +67,19 @@ class AudioLDM_IEC:
         self._shared_base_noise: Optional[torch.Tensor] = None
         self._fn_stft: Optional[TacotronSTFT] = None
         self._style_transfer_sampler: Optional[DDIMSampler] = None
+        # conditioning モード用の seed 固定乱数生成器（None の場合はグローバル RNG を使用）
+        self._rng: Optional[np.random.Generator] = None
+        # initialize_population_conditioning に渡された x_T_seed（履歴記録用）
+        self._x_T_seed: Optional[int] = None
+        # x_T選択フェーズ（initialize_population_seed_selection）で生成した個体群
+        self._seed_selection_population: List[ConditioningGenotype] = []
+        # initialize_population_seed_selection に base_embedding (c*) が渡された場合、
+        # select_seed_winner で次の conditioning 初期化に引き継ぐための保持変数
+        self._seed_selection_base_embedding: Optional[torch.Tensor] = None
+        # initialize_population_conditioning で設定された基準 embedding。
+        # evolve_population_conditioning の SLERP B-1/B-2 基準点として世代を通じて保持される
+        # （x_TガチャからCLAP-IECに戻った際は c* がここに引き継がれる）
+        self._conditioning_c_base: Optional[torch.Tensor] = None
         
         # AudioLDMモデルのロード
         print(f"AudioLDMモデルをロード中: {model_name}")
@@ -750,6 +765,37 @@ class AudioLDM_IEC:
             cond.embed_mode = orig_mode
             cond.unconditional_prob = orig_prob
 
+    def compute_clap_audio_text_similarity(self, waveform: np.ndarray, text: str) -> float:
+        """生成音声とプロンプトの CLAP コサイン類似度（自己整合スコア）を計算する。
+
+        AudioLDM が生成した音声に、指定プロンプトの意味がどれだけ反映されているかの
+        代理指標。プロンプトプールの事前評価・フィルタリングに使用する。
+
+        Args:
+            waveform: _sample_audio / _sample_audio_batch の出力形式
+                (1, samples) または (1, 1, samples)。
+            text: 評価対象のプロンプト文字列。
+        """
+        wf = torch.as_tensor(waveform, device=self.device).float()
+        if wf.dim() == 3:
+            wf = wf.squeeze(1)  # (1, samples)
+        wf = wf / (wf.abs().max() + 1e-8) * 0.5
+
+        cond = self.latent_diffusion.cond_stage_model
+        orig_mode = cond.embed_mode
+        orig_prob = cond.unconditional_prob
+        cond.unconditional_prob = 0.0
+        try:
+            with torch.no_grad():
+                cond.embed_mode = "audio"
+                audio_emb = cond(wf).squeeze(1)  # (1, 512)
+            text_emb = self._encode_text_single(text).squeeze(1)  # (1, 512)
+            sim = F.cosine_similarity(audio_emb, text_emb, dim=1)
+        finally:
+            cond.embed_mode = orig_mode
+            cond.unconditional_prob = orig_prob
+        return float(sim.item())
+
     def _generate_audio_from_conditioning_genotype(
         self, genotype: ConditioningGenotype
     ) -> np.ndarray:
@@ -774,6 +820,77 @@ class AudioLDM_IEC:
                 mel = self.latent_diffusion.decode_first_stage(samples)
                 wf = self.latent_diffusion.mel_spectrogram_to_waveform(mel)
         return wf[0:1]
+
+    def generate_long_audio_from_conditioning_genotype(
+        self,
+        genotype: "ConditioningGenotype",
+        duration: float,
+        audio_path: Optional[str] = None,
+    ) -> np.ndarray:
+        """選択した個体の CLAP 埋め込みを使い、任意の長さで音声を再生成する。
+
+        audio_path が指定された場合はアウトペインティング:
+          - 元音声を VAE エンコードして z0 を取得し、先頭 base_t フレームをマスクで固定
+          - 残りを DDIM で自由生成する（各ステップで mask 領域を q_sample(z0,t) で上書き）
+          - 結果: 先頭 base_t フレームが元音声と完全一致し、以降は自然に続く延長音声
+
+        audio_path が None の場合は seed ベースの決定論的生成にフォールバック。
+        latent_t_size を一時的に書き換えて生成後に元に戻す。
+        """
+        new_t = duration_to_latent_t_size(duration)
+        old_t = self.latent_diffusion.latent_t_size
+        C, base_t, F = self.latent_shape
+        self.latent_diffusion.latent_t_size = new_t
+        try:
+            cond = genotype.embedding.to(self.device)
+
+            # --- x_T: seed から決定論的生成（先頭 base_t が固定 x_T と一致） ---
+            if self._x_T_seed is not None:
+                gen = torch.Generator(device=self.device).manual_seed(int(self._x_T_seed))
+                x_T_base = torch.randn((1, C, base_t, F), device=self.device, generator=gen)
+                if new_t > base_t:
+                    x_T_ext = torch.randn(
+                        (1, C, new_t - base_t, F), device=self.device, generator=gen)
+                    x_T = torch.cat([x_T_base, x_T_ext], dim=2)
+                else:
+                    x_T = x_T_base[:, :, :new_t, :]
+            else:
+                x_T = torch.randn((1, C, new_t, F), device=self.device)
+
+            # --- アウトペインティング: 元音声の z0 を先頭に固定 ---
+            mask = None
+            x0 = None
+            if audio_path is not None and new_t > base_t:
+                # encode_audio_to_z0 は self.duration 基準でエンコードするため、
+                # latent_t_size を new_t に書き換えた後でも base_t の z0 が返る
+                z0_short = self.encode_audio_to_z0(audio_path)   # (1, C, base_t, F)
+                pad = torch.zeros(1, C, new_t - base_t, F, device=self.device)
+                x0 = torch.cat([z0_short, pad], dim=2)            # (1, C, new_t, F)
+                mask = torch.zeros(1, 1, new_t, F, device=self.device)
+                mask[:, :, :base_t, :] = 1.0                      # 先頭を固定
+
+            with self.latent_diffusion.ema_scope("Long Audio"):
+                with torch.no_grad():
+                    uc = self.latent_diffusion.cond_stage_model.get_unconditional_condition(1)
+                    samples, _ = self.latent_diffusion.sample_log(
+                        cond=cond,
+                        batch_size=1,
+                        ddim=True,
+                        ddim_steps=self.ddim_steps,
+                        eta=0.0,
+                        unconditional_guidance_scale=self.guidance_scale,
+                        unconditional_conditioning=uc,
+                        x_T=x_T,
+                        mask=mask,
+                        x0=x0,
+                    )
+                    if torch.max(torch.abs(samples)) > 1e2:
+                        samples = torch.clip(samples, min=-10, max=10)
+                    mel = self.latent_diffusion.decode_first_stage(samples)
+                    wf = self.latent_diffusion.mel_spectrogram_to_waveform(mel)
+            return wf[0:1]
+        finally:
+            self.latent_diffusion.latent_t_size = old_t
 
     def _compute_centroid_stability(
         self,
@@ -856,10 +973,10 @@ class AudioLDM_IEC:
     def _generate_audio_batch_conditioning(
         self, genotypes: List[ConditioningGenotype]
     ) -> List[np.ndarray]:
-        """ConditioningGenotype のバッチを一括処理する（x_T は全個体で同一を期待）。"""
+        """ConditioningGenotype のバッチを一括処理する（個体ごとの x_T を使用）。"""
         n = len(genotypes)
         cond_batch = torch.cat([g.embedding.to(self.device) for g in genotypes], dim=0)  # (N,1,512)
-        x_T_batch = genotypes[0].x_T.to(self.device).expand(n, -1, -1, -1).clone()
+        x_T_batch = torch.cat([g.x_T.to(self.device) for g in genotypes], dim=0)  # (N,C,T,F)
 
         with self.latent_diffusion.ema_scope("Conditioning Batch"):
             with torch.no_grad():
@@ -880,64 +997,256 @@ class AudioLDM_IEC:
                 wf_batch = self.latent_diffusion.mel_spectrogram_to_waveform(mel)
         return [wf_batch[i:i+1] for i in range(n)]
 
+    def initialize_population_seed_selection(
+        self,
+        prompt: str = "",
+        n_candidates: int = 8,
+        x_T_seed: Optional[int] = None,
+        prompt_pool: Optional[List[str]] = None,
+        base_embedding: Optional[torch.Tensor] = None,
+    ) -> List[Tuple[ConditioningGenotype, np.ndarray]]:
+        """x_T選択フェーズ: 音響テクスチャ (x_T) の選択。
+
+        全個体が同一の conditioning（base prompt の CLAP embedding、SLERPなし）を持ち、
+        x_T のみが個体ごとに異なる。ユーザーが select_seed_winner() で1個体を選ぶと、
+        その x_T が以後の世代で共有される（pure shared mode）。
+
+        「音響テクスチャの選択」と「意味空間の探索（conditioning GA）」を段階分離する
+        ための最初のフェーズ。conditioning が全個体で同一なため、x_T の違いだけを
+        試聴・比較できる。
+
+        prompt が未指定の場合はプールからランダムに1つ選び、全個体で共有する。
+
+        base_embedding が指定された場合（x_TガチャとCLAP-IECの行き来）、prompt の
+        エンコードの代わりにこの CLAP embedding を c_base として使用する。CLAP-IEC で
+        収束した個体の embedding を c* として渡すことで、その意味的方向を保ったまま
+        音響テクスチャ (x_T) だけを選び直すことができる。select_seed_winner() で
+        この c* が次の conditioning 初期化に引き継がれる。
+        """
+        print(f"[x_T選択] {n_candidates}個体の候補を生成中...")
+
+        if x_T_seed is None:
+            x_T_seed = int(np.random.randint(0, 2**32 - 1))
+        self._rng = np.random.default_rng(x_T_seed)
+        self._x_T_seed = x_T_seed
+        self._conditioning_x_T = None
+
+        if base_embedding is not None:
+            c_base = base_embedding.clone().to(self.device)
+            effective_prompt = f"<c*:gen{self.population.generation_number}>"
+            self._seed_selection_base_embedding = c_base.clone()
+        else:
+            pool = prompt_pool or PROMPT_POOL
+            effective_prompt = prompt if prompt else str(np.random.choice(pool))
+            c_base = self._encode_text_single(effective_prompt)
+            self._seed_selection_base_embedding = None
+
+        genotypes: List[ConditioningGenotype] = []
+        for _ in range(n_candidates):
+            ind_x_T, ind_seed = self._make_x_T()
+            g = ConditioningGenotype(
+                embedding=c_base.clone(),
+                x_T=ind_x_T,
+                source_prompt=effective_prompt,
+                seed=ind_seed,
+                metadata={
+                    "ga_mode": "conditioning",
+                    "phase": "seed_selection",
+                    "initialization": "seed_selection",
+                    "base_prompt": effective_prompt,
+                    "prompt": effective_prompt,
+                    "x_T_seed": self._x_T_seed,
+                },
+            )
+            g.generation = -1
+            genotypes.append(g)
+
+        self._seed_selection_population = genotypes
+
+        waveforms = self._generate_audio_batch_conditioning(genotypes)
+        print(f"  [x_T選択] {len(genotypes)}個体の音声生成完了")
+        return list(zip(genotypes, waveforms))
+
+    def select_seed_winner(
+        self,
+        winner_index: int,
+        slerp_alpha: float = 0.4,
+        prompt_pool: Optional[List[str]] = None,
+        weighted_b2: bool = False,
+    ) -> List[Tuple[ConditioningGenotype, np.ndarray]]:
+        """x_T選択フェーズで選ばれた個体の x_T を以後の世代で共有する固定 x_T として
+        確定し、IEC初期個体群を pure shared mode で生成する。
+
+        選ばれた個体の seed を x_T_seed として initialize_population_conditioning に
+        渡すことで、選ばれた個体と同一の x_T を再現し、x_T_mode="shared" で
+        セッション全体に固定する。
+
+        initialize_population_seed_selection に base_embedding (c*) が渡されていた
+        場合（x_Tガチャに戻った場合）、その c* を新たな c_base として継承し、
+        世代番号を1つ進める（音声ファイル名の衝突を避けるため）。
+        """
+        if not self._seed_selection_population:
+            raise ValueError("先にx_T選択を実行してください")
+        if not (0 <= winner_index < len(self._seed_selection_population)):
+            raise ValueError(f"無効なx_T選択インデックス: {winner_index}")
+
+        winner = self._seed_selection_population[winner_index]
+        prompt = winner.metadata.get("base_prompt", "")
+        base_embedding = self._seed_selection_base_embedding
+
+        results = self.initialize_population_conditioning(
+            prompt=prompt,
+            slerp_alpha=slerp_alpha,
+            x_T_seed=winner.seed,
+            x_T_mode="shared",
+            prompt_pool=prompt_pool,
+            base_embedding=base_embedding,
+            advance_generation=(base_embedding is not None),
+            weighted_b2=weighted_b2,
+        )
+        for g, _ in results:
+            g.metadata["seed_winner_index"] = winner_index
+            g.metadata["seed_winner_seed"] = winner.seed
+        # history には initialize_population_conditioning 内で複製済みのため、
+        # 同じメタデータを別途反映しておく（save_history で再現情報を残すため）
+        if self.population.history:
+            for h in self.population.history[-1]:
+                h.metadata["seed_winner_index"] = winner_index
+                h.metadata["seed_winner_seed"] = winner.seed
+        return results
+
+    def start_gacha_from_individual(
+        self,
+        index: int,
+        n_candidates: int = 8,
+        x_T_seed: Optional[int] = None,
+    ) -> List[Tuple[ConditioningGenotype, np.ndarray]]:
+        """x_TガチャとCLAP-IECの行き来: 現世代の個体のCLAP embeddingを c* として、
+        新たな x_T選択フェーズ（initialize_population_seed_selection）を開始する。
+
+        CLAP-IECで収束した個体の意味的方向 (c*) を保ったまま、音響テクスチャ (x_T) を
+        選び直すための入口。ユーザーが select_seed_winner() で新たな x_T を選ぶと、
+        その c* が次のIEC初期個体群の c_base として継承される。
+
+        Args:
+            index: self.population.current_generation 内の個体インデックス（c* の元）
+            n_candidates: 生成する x_T 候補数
+            x_T_seed: 候補群のノイズ生成に使う seed（None でランダム）
+        """
+        if not (0 <= index < len(self.population.current_generation)):
+            raise ValueError(f"無効な個体インデックス: {index}")
+
+        c_star = self.population.current_generation[index].embedding.clone()
+        return self.initialize_population_seed_selection(
+            n_candidates=n_candidates,
+            x_T_seed=x_T_seed,
+            base_embedding=c_star,
+        )
+
     def initialize_population_conditioning(
         self,
         prompt: str,
-        slerp_alpha: float = 0.5,
+        slerp_alpha: float = 0.4,
         x_T_seed: Optional[int] = None,
         prompt_pool: Optional[List[str]] = None,
+        x_T_mode: str = "inherit",
+        base_embedding: Optional[torch.Tensor] = None,
+        advance_generation: bool = False,
+        weighted_b2: bool = False,
     ) -> List[Tuple[ConditioningGenotype, np.ndarray]]:
         """Conditioning Vector GA の初期個体群を生成する。
 
         初期多様性の注入: B-2 SLERP（ベースプロンプトのCLAP埋め込みと
         ランダムプロンプトのCLAP埋め込みの間を alpha だけ補間）。
-        x_T はセッション全体で固定・共有する。
+        x_T_mode == "shared" のとき x_T はセッション全体で固定・共有する。
+        それ以外は個体ごとに独立した x_T を生成する。
+
+        x_T_seed が指定された場合、x_T の生成は seed に従う専用乱数生成器
+        （self._rng）に基づき決定論的に行われる。以後の evolve_population_conditioning
+        でもこの生成器が引き継がれる。なお rand_prompt（B-2 SLERP の相手プロンプト）の
+        選択は seed に依存せず毎回ランダムに行われる。
+
+        x_T_seed が未指定の場合は乱数で1つ生成し、以後はそのseedに従う
+        （self._x_T_seed に記録され、各個体の metadata 経由で履歴に残るため
+        後から x_T を再現できる）。
+
+        base_embedding が指定された場合、prompt のエンコードの代わりにこの CLAP
+        embedding を c_base として使用する（x_Tガチャから戻った際の c* 継承用）。
+        c_base は self._conditioning_c_base に保持され、以後の
+        evolve_population_conditioning で SLERP B-1/B-2 の基準点として使われ続ける。
+
+        advance_generation=True の場合、個体群を生成する前に
+        self.population.generation_number を1つ進める。x_Tガチャに戻って再初期化
+        する際（同じ世代番号への音声ファイル上書きを避けるため）に使用する。
         """
+        if advance_generation:
+            self.population.generation_number += 1
+
         print(f"[Conditioning GA] 第{self.population.generation_number}世代を生成中...")
         print(f"  プロンプト: '{prompt}'  alpha={slerp_alpha}")
 
         pool = prompt_pool or PROMPT_POOL
 
-        # 固定 x_T を生成・保存
-        if x_T_seed is not None:
+        if x_T_seed is None:
+            x_T_seed = int(np.random.randint(0, 2**32 - 1))
+
+        # seed 固定の乱数生成器を準備（x_T 選択の再現性確保。rand_prompt の選択には使わない）
+        self._rng = np.random.default_rng(x_T_seed)
+        # 履歴記録用。以後生成される全個体の metadata に引き継がれる
+        self._x_T_seed = x_T_seed
+
+        # x_T の準備（"shared" モードのみセッション固定）
+        if x_T_mode == "shared":
             gen = torch.Generator(device=self.device).manual_seed(x_T_seed)
-            x_T = torch.randn((1,) + self.latent_shape, device=self.device, generator=gen)
+            self._conditioning_x_T = torch.randn((1,) + self.latent_shape, device=self.device, generator=gen)
         else:
-            x_T = torch.randn((1,) + self.latent_shape, device=self.device)
-        self._conditioning_x_T = x_T
+            self._conditioning_x_T = None
 
-        # ベースプロンプトをエンコード
-        c_base = self._encode_text_single(prompt)           # (1, 1, 512)
-        base_norm = float(torch.norm(c_base.float()).item())
-
-        # 重複なしでサンプリング。プール数が個体数より少ない場合のみ replace=True にフォールバック
-        if len(pool) >= self.population_size:
-            sampled_prompts = np.random.choice(pool, size=self.population_size, replace=False).tolist()
+        # ベースembedding/プロンプトを準備（未指定時は SLERP せずプール embedding をそのまま使う）
+        if base_embedding is not None:
+            c_base = base_embedding.clone().to(self.device)  # (1, 1, 512)
         else:
-            # プールを使い切った後、残りは再度重複なしで補完する
-            sampled_prompts = list(np.random.permutation(pool))
-            while len(sampled_prompts) < self.population_size:
-                extra = np.random.choice(
-                    pool,
-                    size=min(len(pool), self.population_size - len(sampled_prompts)),
-                    replace=False,
-                ).tolist()
-                sampled_prompts.extend(extra)
-            sampled_prompts = sampled_prompts[:self.population_size]
+            c_base = self._encode_text_single(prompt) if prompt else None  # (1, 1, 512) or None
+        self._conditioning_c_base = c_base
+
+        # rand_prompt の選択は seed に依存させず、毎回グローバル乱数で行う
+        if prompt_pool is None:
+            sampled_prompts = sample_prompts(self.population_size, weighted=weighted_b2)
+        else:
+            # カスタムプール指定時: 加重なしで np.random.choice
+            if len(pool) >= self.population_size:
+                sampled_prompts = np.random.choice(pool, size=self.population_size, replace=False).tolist()
+            else:
+                sampled_prompts = list(np.random.permutation(pool))
+                while len(sampled_prompts) < self.population_size:
+                    extra = np.random.choice(
+                        pool,
+                        size=min(len(pool), self.population_size - len(sampled_prompts)),
+                        replace=False,
+                    ).tolist()
+                    sampled_prompts.extend(extra)
+                sampled_prompts = sampled_prompts[:self.population_size]
 
         genotypes: List[ConditioningGenotype] = []
         for i, rand_prompt in enumerate(sampled_prompts):
-            seed = int(np.random.randint(0, 2**32 - 1))
-            if slerp_alpha > 0.0:
-                c_rand = self._encode_text_single(rand_prompt)
+            if x_T_mode == "shared":
+                ind_x_T = self._conditioning_x_T
+                ind_seed = x_T_seed
+            else:
+                ind_x_T, ind_seed = self._make_x_T()
+            c_rand = self._encode_text_single(rand_prompt)
+            if c_base is None:
+                # ベースプロンプト未指定: プール embedding をそのまま使う（SLERPなし）
+                embedding = c_rand
+            elif slerp_alpha > 0.0:
                 embedding = slerp_conditioning(c_base, c_rand, slerp_alpha)
             else:
                 embedding = c_base.clone()
             g = ConditioningGenotype(
                 embedding=embedding,
-                x_T=x_T,
-                source_prompt=rand_prompt if slerp_alpha > 0.0 else prompt,
-                seed=seed,
+                x_T=ind_x_T,
+                source_prompt=rand_prompt if (c_base is None or slerp_alpha > 0.0) else prompt,
+                seed=ind_seed,
                 metadata={
                     "ga_mode": "conditioning",
                     "initialization": "slerp_prompt",
@@ -945,6 +1254,7 @@ class AudioLDM_IEC:
                     "rand_prompt": rand_prompt,
                     "slerp_alpha": slerp_alpha,
                     "prompt": prompt,
+                    "x_T_seed": self._x_T_seed,
                 },
             )
             g.generation = self.population.generation_number
@@ -957,25 +1267,84 @@ class AudioLDM_IEC:
         print(f"  [Conditioning GA] {len(genotypes)}個体の音声生成完了")
         return list(zip(genotypes, waveforms))
 
+    def _make_x_T(self) -> Tuple[torch.Tensor, int]:
+        """新規のノイズテンソルと seed を生成して返す（self._rng が設定されていればそれに従う）。"""
+        seed = self._rng_randint(0, 2**32 - 1)
+        gen = torch.Generator(device=self.device).manual_seed(seed)
+        x_T = torch.randn((1,) + self.latent_shape, device=self.device, generator=gen)
+        return x_T, seed
+
+    # ------------------------------------------------------------------
+    # conditioning モード用の seed 固定乱数ヘルパー
+    # self._rng が設定されている場合はそれに従い、未設定ならグローバル RNG を使う。
+    # ------------------------------------------------------------------
+    def _rng_uniform(self, low: float, high: float) -> float:
+        if self._rng is not None:
+            return float(self._rng.uniform(low, high))
+        return float(np.random.uniform(low, high))
+
+    def _rng_randint(self, low: int, high: int) -> int:
+        if self._rng is not None:
+            return int(self._rng.integers(low, high))
+        return int(np.random.randint(low, high))
+
+    def _rng_random(self) -> float:
+        if self._rng is not None:
+            return float(self._rng.random())
+        return float(np.random.random())
+
+    def _rng_choice(self, a, size=None, replace: bool = True):
+        if self._rng is not None:
+            return self._rng.choice(a, size=size, replace=replace)
+        return np.random.choice(a, size=size, replace=replace)
+
+    def _rng_permutation(self, a):
+        if self._rng is not None:
+            return self._rng.permutation(a)
+        return np.random.permutation(a)
+
+    def _rng_shuffle(self, a: list) -> None:
+        if self._rng is not None:
+            self._rng.shuffle(a)
+        else:
+            random.shuffle(a)
+
     def evolve_population_conditioning(
         self,
         selected_indices: List[int],
-        mutation_mu_range: Tuple[float, float] = (0.05, 0.15),
+        mutation_mu_range: Tuple[float, float] = (0.10, 0.25),
         p_mut: float = 0.5,
-        elite_count: int = 2,
+        elite_count: int = 1,
         random_sample_count: int = 1,
+        random_b1_count: int = 0,
         prompt_pool: Optional[List[str]] = None,
+        x_T_mode: str = "inherit",
+        weighted_b2: bool = False,
     ) -> Tuple[List[Tuple[ConditioningGenotype, np.ndarray]], Dict]:
         """Conditioning Vector GA の次世代を生成する。
 
         世代構成（6体標準）:
           - エリート: min(elite_count, len(selected)) 体
-          - ランダムサンプル: random_sample_count 体（末尾、SLERP B-2）
-          - 交叉スロット: 残り体数（SLERP 交叉 + 確率 p_mut で Micro-SLERP 変異）
+          - ランダムサンプル: random_sample_count 体（末尾、SLERP B-1/B-2）
+          - 交叉スロット: 残り体数（SLERP 交叉 + round(交叉スロット数 * p_mut) 体に Micro-SLERP 変異）
+
+        x_T_mode:
+          "shared"     - 全世代・全個体でセッション固定の同一 x_T (self._conditioning_x_T)
+          "elite_keep" - エリートは前世代の x_T を保持、その他は新規生成
+          "inherit"    - エリート・交叉個体は前世代/親の x_T を継承、ランダムは新規生成（デフォルト）
 
         交叉: conditioning vector 間の SLERP (alpha ~ Uniform(0.3, 0.7))
-        変異: Micro-SLERP（プール embedding 方向へ mu ~ Uniform(*mutation_mu_range) だけ移動）
-        ランダムサンプル: プールから新規 CLAP embedding → SLERP B-2 (alpha ~ Uniform(0.3, 0.6))
+        変異: Micro-SLERP（プール embedding 方向へ mu ~ Uniform(*mutation_mu_range) だけ移動）。
+          適用個体数は round(交叉スロット数 * p_mut) に固定し、対象スロットはシャッフルで決定する
+          （各スロット独立のベルヌーイ試行ではない）。
+        ランダムサンプル: プールから新規 CLAP embedding との SLERP B-2 (alpha = 0.4 固定)。
+          random_b1_count 体は、超球面一様サンプルとの SLERP B-1 (alpha = 0.4 固定) に置き換える
+          （デフォルト 0 体 = 全て B-2）。
+
+        x_T_seed が initialize 時に指定されている場合、x_T の生成・交叉/変異の
+        パラメータサンプリングは self._rng（seed固定の乱数生成器）に従い決定論的に
+        行われる。ただし pool_prompt/rand_prompt（プールからのプロンプト選択）は
+        seed に依存せず毎回ランダムに行われる。
 
         Returns:
             (個体, 波形) のリストと収束情報辞書
@@ -986,11 +1355,12 @@ class AudioLDM_IEC:
 
         selected = [self.population.current_generation[i] for i in selected_indices]
         prompt = selected[0].metadata.get("base_prompt", "")
-        x_T = selected[0].x_T   # 全個体で共有
 
         pool = prompt_pool or PROMPT_POOL
-        # ベースプロンプトの CLAP embedding（Micro-SLERP 変異の起点として使用）
-        c_base = self._encode_text_single(prompt) if prompt else None
+        # SLERP B-1/B-2 の基準点。initialize_population_conditioning で設定された
+        # ものを世代を通じて保持する（x_TガチャからCLAP-IECに戻った際は c* が
+        # ここに引き継がれる）
+        c_base = self._conditioning_c_base
 
         next_gen: List[ConditioningGenotype] = []
 
@@ -1001,6 +1371,10 @@ class AudioLDM_IEC:
             elite.generation = self.population.generation_number + 1
             elite.metadata["elite"] = True
             elite.metadata["elite_parent_pop_index"] = selected_indices[i]
+            if x_T_mode == "shared":
+                elite.x_T = self._conditioning_x_T
+                elite.seed = None
+            # "elite_keep" / "inherit": 前世代の x_T をそのまま保持（clone済み）
             next_gen.append(elite)
 
         # 2. 末尾にランダムサンプルスロットを予約（後で埋める）
@@ -1008,30 +1382,58 @@ class AudioLDM_IEC:
         crossover_slots = self.population_size - actual_elite - actual_random
 
         # 3. 交叉スロットを埋める
+        # p_mut に応じて、交叉スロットのうち Micro-SLERP 変異を適用する個体数を固定する
+        # （各スロットで独立に確率判定するのではなく、round(交叉スロット数 * p_mut) 体に
+        #  変異を適用し、対象スロットはシャッフルでランダムに決める）
+        n_mutate = int(round(crossover_slots * p_mut))
+        mutate_flags = [True] * n_mutate + [False] * (crossover_slots - n_mutate)
+        self._rng_shuffle(mutate_flags)
+
         while len(next_gen) < actual_elite + crossover_slots:
+            slot_idx = len(next_gen) - actual_elite
             if len(selected) == 1:
                 # 選択個体が1体の場合は Micro-SLERP のみ
-                pool_prompt = sample_prompts(1, exclude=[prompt])[0]
+                # （プール側プロンプトの選択は seed に依存させない）
+                pool_prompt = sample_prompts(1, exclude=[prompt], weighted=weighted_b2)[0]
                 c_pool = self._encode_text_single(pool_prompt)
                 child = mutate_conditioning_micro_slerp(
                     selected[0],
                     c_pool,
-                    mu=float(np.random.uniform(*mutation_mu_range)),
+                    mu=self._rng_uniform(*mutation_mu_range),
                 )
+                child.metadata.pop("initialization", None)
+                child.metadata.pop("slerp_alpha", None)
+                # 親が前世代のエリートだった場合、elite フラグが clone() 経由で
+                # 引き継がれてしまうため、新規個体として除去する
+                child.metadata.pop("elite", None)
+                child.metadata.pop("elite_parent_pop_index", None)
                 child.metadata["parent_pop_index"] = selected_indices[0]
+                p1 = selected[0]
+                p2 = None
             else:
-                pair_idx = np.random.choice(len(selected), size=2, replace=False)
+                pair_idx = self._rng_choice(len(selected), size=2, replace=False)
                 p1, p2 = selected[pair_idx[0]], selected[pair_idx[1]]
-                alpha = float(np.random.uniform(0.3, 0.7))
+                alpha = self._rng_uniform(0.3, 0.7)
                 child = crossover_conditioning_slerp(p1, p2, alpha)
+                child.metadata.pop("initialization", None)
+                # 親から引き継いだ古い slerp_alpha が残っていると、この交叉自身の
+                # crossover_alpha 表示を覆い隠してしまうため除去する
+                child.metadata.pop("slerp_alpha", None)
+                # 親（p1）が前世代のエリートだった場合、elite フラグが clone() 経由で
+                # 引き継がれてしまい、新規の交叉個体が「⭐ エリート保存」と誤表示されるため除去する
+                child.metadata.pop("elite", None)
+                child.metadata.pop("elite_parent_pop_index", None)
                 child.metadata["crossover_parent1_pop_index"] = selected_indices[pair_idx[0]]
                 child.metadata["crossover_parent2_pop_index"] = selected_indices[pair_idx[1]]
-                # 確率 p_mut で Micro-SLERP 変異を適用
-                if np.random.random() < p_mut:
-                    pool_prompt = sample_prompts(1, exclude=[prompt])[0]
+                # p_mut に応じて固定数の個体に Micro-SLERP 変異を適用
+                if mutate_flags[slot_idx]:
+                    # プール側プロンプトの選択は seed に依存させない
+                    pool_prompt = sample_prompts(1, exclude=[prompt], weighted=weighted_b2)[0]
                     c_pool = self._encode_text_single(pool_prompt)
-                    mu = float(np.random.uniform(*mutation_mu_range))
+                    mu = self._rng_uniform(*mutation_mu_range)
                     child = mutate_conditioning_micro_slerp(child, c_pool, mu=mu)
+                    child.metadata.pop("initialization", None)
+                    child.metadata.pop("slerp_alpha", None)
                     child.metadata.update({
                         "operation": "crossover_then_mutate",
                         "crossover_type": "slerp",
@@ -1041,43 +1443,83 @@ class AudioLDM_IEC:
                         "mu": mu,
                         "pool_prompt": pool_prompt,
                     })
-            child.x_T = x_T
+            # x_T の割り当て
+            if x_T_mode == "shared":
+                child.x_T = self._conditioning_x_T
+                child.seed = None
+            elif x_T_mode == "inherit" and p1 is not None:
+                candidates = [p for p in [p1, p2] if p is not None]
+                if len(candidates) > 1:
+                    parent_for_xT = candidates[self._rng_randint(0, len(candidates))]
+                else:
+                    parent_for_xT = candidates[0]
+                child.x_T = parent_for_xT.x_T
+                child.seed = getattr(parent_for_xT, "seed", None)
+            else:  # "elite_keep"
+                child.x_T, child.seed = self._make_x_T()
             child.generation = self.population.generation_number + 1
             child.metadata["base_prompt"] = prompt
             child.metadata["prompt"] = prompt
             next_gen.append(child)
 
-        # 4. ランダムサンプルスロット: プールから新規 CLAP embedding → SLERP B-2
-        rs_prompts = sample_prompts(actual_random, exclude=[prompt])
-        for rs_prompt in rs_prompts:
-            c_rand = self._encode_text_single(rs_prompt)
-            alpha_rand = float(np.random.uniform(0.3, 0.6))
+        # 4. ランダムサンプルスロット: SLERP B-1（超球面一様, random_b1_count体）
+        #    + SLERP B-2（プロンプトプール由来, 残り）。alpha = 0.4 固定（初期個体生成と同じ理屈）。
+        alpha_rand = 0.4
+        actual_b1 = min(random_b1_count, actual_random)
+        actual_b2 = actual_random - actual_b1
+        # SLERP B-2 のプロンプト選択は seed に依存させない
+        rs_prompts = sample_prompts(actual_b2, exclude=[prompt], weighted=weighted_b2)
+        ref_embedding = c_base if c_base is not None else selected[0].embedding
+        for slot in range(actual_random):
+            if slot < actual_b1:
+                # SLERP B-1: 超球面上の一様サンプルとの SLERP
+                gen = torch.Generator(device=self.device).manual_seed(self._rng_randint(0, 2**32 - 1))
+                c_rand = sample_random_unit_embedding(
+                    ref_embedding.shape, device=self.device, dtype=ref_embedding.dtype, generator=gen
+                )
+                rs_prompt = "<random_unit_vector>"
+                op_label = "random_sample_b1"
+            else:
+                # SLERP B-2: プロンプトプール由来
+                rs_prompt = rs_prompts[slot - actual_b1]
+                c_rand = self._encode_text_single(rs_prompt)
+                op_label = "random_sample"
             if c_base is not None:
                 embedding = slerp_conditioning(c_base, c_rand, alpha_rand)
             else:
                 embedding = c_rand
+            if x_T_mode == "shared":
+                rs_x_T = self._conditioning_x_T
+                rs_seed = None
+            else:
+                rs_x_T, rs_seed = self._make_x_T()
             child = ConditioningGenotype(
                 embedding=embedding,
-                x_T=x_T,
+                x_T=rs_x_T,
                 source_prompt=rs_prompt,
-                seed=int(np.random.randint(0, 2**32 - 1)),
+                seed=rs_seed,
                 metadata={
                     "ga_mode": "conditioning",
-                    "operation": "random_sample",
+                    "initialization": "random_sample",
+                    "operation": op_label,
                     "base_prompt": prompt,
                     "prompt": prompt,
                     "rand_prompt": rs_prompt,
                     "slerp_alpha": alpha_rand,
+                    "x_T_seed": self._x_T_seed,
                 },
             )
             child.generation = self.population.generation_number + 1
             next_gen.append(child)
 
+        # 5. 順序をシャッフルしてエリート・交叉・ランダムの並びを隠す
+        self._rng_shuffle(next_gen)
+
         self.population.generation_number += 1
         self.population.current_generation = next_gen[:self.population_size]
         self.population.history.append([g.clone() for g in self.population.current_generation])
 
-        # 5. 収束情報を計算
+        # 6. 収束情報を計算
         convergence_info = self._compute_conditioning_convergence(selected)
 
         waveforms = self._generate_audio_batch_conditioning(self.population.current_generation)
@@ -1099,14 +1541,18 @@ class AudioLDM_IEC:
         prompt が与えられた場合は SLERP B-2（base ↔ ランダムプロンプト, alpha~Uniform(*alpha_range)）
         で意味的なアンカーを保ちつつ多様性を持たせる。prompt が None の場合は
         プールのプロンプト embedding をそのまま用いる。
+
+        x_T_seed を指定すると、x_T選択フェーズで選んだノイズと同一の x_T を
+        この対照条件でも再利用できる（「x_T を制御した上で進化計算の有無だけが
+        異なる」比較のため）。未指定の場合はランダムなseedを自動生成し、
+        各個体の metadata["x_T_seed"] に記録する。
         """
         pool = prompt_pool or PROMPT_POOL
 
-        if x_T_seed is not None:
-            gen = torch.Generator(device=self.device).manual_seed(x_T_seed)
-            x_T = torch.randn((1,) + self.latent_shape, device=self.device, generator=gen)
-        else:
-            x_T = torch.randn((1,) + self.latent_shape, device=self.device)
+        if x_T_seed is None:
+            x_T_seed = int(np.random.randint(0, 2**32 - 1))
+        gen = torch.Generator(device=self.device).manual_seed(x_T_seed)
+        x_T = torch.randn((1,) + self.latent_shape, device=self.device, generator=gen)
 
         if len(pool) >= self.population_size:
             sampled_prompts = np.random.choice(pool, size=self.population_size, replace=False).tolist()
@@ -1145,6 +1591,7 @@ class AudioLDM_IEC:
                     "base_prompt": prompt,
                     "rand_prompt": rand_prompt,
                     "slerp_alpha": alpha,
+                    "x_T_seed": x_T_seed,
                 },
             )
             g.generation = 0

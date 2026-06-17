@@ -55,6 +55,14 @@ class IECInterface:
         self.baseline_audio_paths: List[str] = []
         self._baseline_round: int = 0
 
+        # x_T選択フェーズ用の状態
+        self.seed_selection_results: List[Tuple] = []
+        self.seed_selection_audio_paths: List[str] = []
+        # x_T選択経由でセッションを開始したか（true の場合 evolve は x_T_mode="shared" を強制）
+        self._seed_selection_active: bool = False
+        # x_TガチャとCLAP-IECの往復ラウンド数（UI表示用、1始まり）
+        self._gacha_round: int = 1
+
         # ログ
         self.interaction_log = []
         # 直近で個体群を提示した時刻（選好時間 = 提示〜次の選択操作までの経過時間の起点）
@@ -70,15 +78,17 @@ class IECInterface:
         ga_mode: str = "latent",
         transform_init_std: float = 0.3,
         base_noise_seed_str: str = "",
-        cond_slerp_alpha: float = 0.5,
+        cond_slerp_alpha: float = 0.4,
         cond_x_T_seed_str: str = "",
+        x_T_mode: str = "inherit",
+        weighted_b2: bool = False,
         progress=gr.Progress()
-    ) -> Tuple[List, str, str]:
+    ) -> Tuple[List, str, str, str]:
         """
         初期世代を生成
-        
+
         Returns:
-            (音声リスト, 情報テキスト, ステータスメッセージ)
+            (音声リスト, 情報テキスト, ステータスメッセージ, x_T seed入力欄の値)
         """
         progress(0, desc="初期個体群を生成中...")
         compute_started_at = datetime.now()
@@ -98,10 +108,8 @@ class IECInterface:
 
             effective_prompt = prompt.strip() if prompt.strip() else None
 
-            # conditioning モード: プロンプト必須
+            # conditioning モード: プロンプト未指定の場合はプール embedding のみで初期化する
             if ga_mode == "conditioning":
-                if not effective_prompt:
-                    return [], "", "⚠️ 条件付けベクトルモードではプロンプトを入力してください"
                 cond_x_T_seed: Optional[int] = None
                 if cond_x_T_seed_str.strip():
                     try:
@@ -110,9 +118,11 @@ class IECInterface:
                         pass
                 self.iec_system.ga_mode = "conditioning"
                 self.current_results = self.iec_system.initialize_population_conditioning(
-                    prompt=effective_prompt,
+                    prompt=effective_prompt or "",
                     slerp_alpha=cond_slerp_alpha,
                     x_T_seed=cond_x_T_seed,
+                    x_T_mode=x_T_mode,
+                    weighted_b2=weighted_b2,
                 )
             else:
                 self.current_results = self.iec_system.initialize_population(
@@ -159,16 +169,232 @@ class IECInterface:
             
             # 情報テキスト
             info = self._get_generation_info()
-            
-            return audio_list, info, message
-            
+
+            # conditioning モードでは実際に使用された x_T seed を入力欄に反映する
+            # （未指定時に自動生成されたseedも含め、再現用に表示する）
+            if ga_mode == "conditioning":
+                seed_str = str(self.iec_system._x_T_seed)
+            else:
+                seed_str = cond_x_T_seed_str
+
+            return audio_list, info, message, seed_str
+
         except Exception as e:
             error_msg = f"エラーが発生しました: {str(e)}"
             print(error_msg)
             import traceback
             traceback.print_exc()
-            return [], "", error_msg
-    
+            return [], "", error_msg, cond_x_T_seed_str
+
+    def run_seed_selection(
+        self,
+        prompt: str,
+        n_candidates: int,
+        x_T_seed_str: str = "",
+        progress=gr.Progress(),
+    ) -> Tuple[List, str, str]:
+        """x_T選択フェーズの候補個体群を生成する。
+
+        全個体が同一の conditioning（base prompt の CLAP embedding）を持ち、
+        x_T のみが異なる。ユーザーはこの中から1個体を select_seed_winner で選ぶ。
+
+        x_T_seed_str を指定すると、候補群を生成する乱数列（各候補のx_T）が
+        その seed から再現可能になる。空欄の場合はランダムなseedが自動生成される。
+
+        Returns:
+            (音声リスト, ステータスメッセージ, x_T seed入力欄の値)
+        """
+        progress(0, desc="x_T候補を生成中...")
+
+        try:
+            effective_prompt = prompt.strip() if prompt.strip() else None
+
+            x_T_seed: Optional[int] = None
+            if x_T_seed_str.strip():
+                try:
+                    x_T_seed = int(x_T_seed_str.strip())
+                except ValueError:
+                    pass
+
+            self.iec_system.ga_mode = "conditioning"
+            self.seed_selection_results = self.iec_system.initialize_population_seed_selection(
+                prompt=effective_prompt or "",
+                n_candidates=int(n_candidates),
+                x_T_seed=x_T_seed,
+            )
+
+            progress(0.7, desc="音声を保存中...")
+            self.seed_selection_audio_paths = self.iec_system.save_generation_audio(
+                self.seed_selection_results,
+                output_dir=self.session_dir,
+                prefix="seed_selection",
+            )
+
+            self.interaction_log.append({
+                "timestamp": datetime.now().isoformat(),
+                "action": "seed_selection",
+                "prompt": prompt,
+                "n_candidates": int(n_candidates),
+                "x_T_seed": self.iec_system._x_T_seed,
+            })
+
+            progress(1.0, desc="完了!")
+            message = (
+                f"🎯 x_T候補（{len(self.seed_selection_results)}個）を生成しました。"
+                "気に入った音を1つ選んでください。"
+            )
+            # 未指定時に自動生成されたseedも含め、再現用に入力欄へ反映する
+            seed_str = str(self.iec_system._x_T_seed)
+            return self.seed_selection_audio_paths, message, seed_str
+
+        except Exception as e:
+            error_msg = f"エラーが発生しました: {str(e)}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            return [], error_msg, x_T_seed_str
+
+    def select_seed_winner(
+        self,
+        winner_label: Optional[str],
+        cond_slerp_alpha: float,
+        weighted_b2: bool = False,
+        progress=gr.Progress(),
+    ) -> Tuple[List, str, str, str]:
+        """x_T選択フェーズで選んだ個体の x_T を以後の世代で共有する固定 x_T として
+        確定し、IEC初期個体群（第0世代）を生成する。
+
+        Returns:
+            (音声リスト, 情報テキスト, ステータスメッセージ, x_T seed入力欄の値)
+        """
+        if not winner_label:
+            return (self.current_audio_paths, self._get_generation_info(),
+                    "⚠️ x_T候補を1つ選択してください", "")
+
+        progress(0, desc="選ばれたノイズでIEC初期個体群を生成中...")
+        compute_started_at = datetime.now()
+        winner_index = int(winner_label.split()[-1])
+        is_gacha_return = self.iec_system._seed_selection_base_embedding is not None
+
+        try:
+            self.current_results = self.iec_system.select_seed_winner(
+                winner_index=winner_index,
+                slerp_alpha=cond_slerp_alpha,
+                weighted_b2=weighted_b2,
+            )
+            self._seed_selection_active = True
+
+            progress(0.7, desc="音声を保存中...")
+            self.current_audio_paths = self.iec_system.save_generation_audio(
+                self.current_results,
+                output_dir=self.session_dir,
+                prefix=f"gen{self.iec_system.population.generation_number:03d}"
+            )
+
+            presented_at = datetime.now()
+            compute_seconds = (presented_at - compute_started_at).total_seconds()
+            self.interaction_log.append({
+                "timestamp": presented_at.isoformat(),
+                "action": "seed_selection_choice",
+                "winner_index": winner_index,
+                "gacha_round": self._gacha_round,
+                "is_gacha_return": is_gacha_return,
+                "generation": self.iec_system.population.generation_number,
+                "population_size": len(self.current_results),
+                "compute_seconds": compute_seconds,
+            })
+            self._presented_at = presented_at
+
+            progress(1.0, desc="完了!")
+            audio_list = [path for path in self.current_audio_paths]
+            info = self._get_generation_info()
+            if is_gacha_return:
+                message = (
+                    f"🔄 ラウンド{self._gacha_round}: 候補{winner_index}のx_Tを採用し、"
+                    "選択個体のCLAP embedding (c*) を継承してIECを再開しました"
+                )
+            else:
+                message = f"🎯 候補{winner_index}のx_Tを採用してIECを開始しました"
+            seed_str = str(self.iec_system._x_T_seed)
+
+            return audio_list, info, message, seed_str
+
+        except Exception as e:
+            error_msg = f"エラーが発生しました: {str(e)}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            return self.current_audio_paths, self._get_generation_info(), error_msg, ""
+
+    def return_to_gacha(
+        self,
+        selected_checkboxes: List[int],
+        n_candidates: int,
+        progress=gr.Progress(),
+    ) -> Tuple[List, str, str]:
+        """x_TガチャとCLAP-IECの行き来: 選択individualのCLAP embeddingを c* として
+        新たな x_T候補群を生成する。
+
+        c* はそのまま次のIEC初期個体群（select_seed_winnerで確定後）の c_base として
+        継承される。ユーザはこの後、表示されたx_T候補から1つ選んで
+        「✅ 選んだx_TでIECを開始」を押すことで、c* を保ったまま新しい音響テクスチャ
+        でIECを再開できる。
+
+        Returns:
+            (音声リスト, ステータスメッセージ, x_T seed入力欄の値)
+        """
+        if self.iec_system.ga_mode != "conditioning":
+            return (self.seed_selection_audio_paths,
+                    "⚠️ Conditioningモードでのみ利用できます", "")
+        if not self.iec_system.population.current_generation:
+            return (self.seed_selection_audio_paths,
+                    "⚠️ 先に初期個体群を生成してください", "")
+        if len(selected_checkboxes) != 1:
+            return (self.seed_selection_audio_paths,
+                    "⚠️ c*として継承する個体を1つだけ選択してください", "")
+
+        progress(0, desc="選択個体のCLAP embeddingでx_T候補を生成中...")
+        index = selected_checkboxes[0]
+
+        try:
+            self.seed_selection_results = self.iec_system.start_gacha_from_individual(
+                index=index, n_candidates=int(n_candidates),
+            )
+            self._seed_selection_active = True
+
+            progress(0.7, desc="音声を保存中...")
+            self.seed_selection_audio_paths = self.iec_system.save_generation_audio(
+                self.seed_selection_results,
+                output_dir=self.session_dir,
+                prefix="seed_selection",
+            )
+
+            self._gacha_round += 1
+            self.interaction_log.append({
+                "timestamp": datetime.now().isoformat(),
+                "action": "return_to_gacha",
+                "source_index": index,
+                "gacha_round": self._gacha_round,
+                "generation": self.iec_system.population.generation_number,
+                "x_T_seed": self.iec_system._x_T_seed,
+            })
+
+            progress(1.0, desc="完了!")
+            message = (
+                f"🔄 ラウンド{self._gacha_round}: 個体{index}のCLAP embeddingを継承して"
+                f"x_T候補（{len(self.seed_selection_results)}個）を生成しました。"
+                "気に入った音を1つ選んでください。"
+            )
+            seed_str = str(self.iec_system._x_T_seed)
+            return self.seed_selection_audio_paths, message, seed_str
+
+        except Exception as e:
+            error_msg = f"エラーが発生しました: {str(e)}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            return self.seed_selection_audio_paths, error_msg, ""
+
     def evolve_generation(
         self,
         selected_checkboxes: List[int],
@@ -179,8 +405,12 @@ class IECInterface:
         crossover_mode: str = "z0",
         sdedit_strength: float = 0.0,
         p_mut: float = 0.5,
-        mutation_mu_max: float = 0.10,
+        mutation_mu_min: float = 0.10,
+        mutation_mu_max: float = 0.25,
         random_sample_count: int = 1,
+        random_b1_count: int = 0,
+        x_T_mode: str = "inherit",
+        weighted_b2: bool = False,
         progress=gr.Progress()
     ) -> Tuple[List, str, str, str]:
         """次世代を生成する。
@@ -189,6 +419,10 @@ class IECInterface:
             (音声リスト, 情報テキスト, ステータスメッセージ, 収束警告テキスト)
         """
         progress(0, desc="選択を確認中...")
+
+        # x_T選択経由でセッションを開始した場合、x_T はそこで選んだものに固定する
+        if self._seed_selection_active:
+            x_T_mode = "shared"
 
         # 選好時間: 前世代の提示〜本選択操作までの経過時間
         selection_clicked_at = datetime.now()
@@ -209,10 +443,13 @@ class IECInterface:
             if self.iec_system.ga_mode == "conditioning":
                 self.current_results, conv_info = self.iec_system.evolve_population_conditioning(
                     selected_indices=selected_checkboxes,
-                    mutation_mu_range=(0.05, float(mutation_mu_max)),
+                    mutation_mu_range=(float(mutation_mu_min), float(mutation_mu_max)),
                     p_mut=float(p_mut),
                     elite_count=int(elite_count),
                     random_sample_count=int(random_sample_count),
+                    random_b1_count=int(random_b1_count),
+                    x_T_mode=x_T_mode,
+                    weighted_b2=weighted_b2,
                 )
                 convergence_text = self._format_convergence_warning(conv_info)
             else:
@@ -248,8 +485,11 @@ class IECInterface:
                 "crossover_mode": crossover_mode,
                 "sdedit_strength": sdedit_strength,
                 "p_mut": p_mut,
+                "mutation_mu_min": mutation_mu_min,
                 "mutation_mu_max": mutation_mu_max,
                 "random_sample_count": random_sample_count,
+                "random_b1_count": random_b1_count,
+                "x_T_mode": x_T_mode,
                 # 選好時間: 前世代の提示〜本選択操作までの経過秒数（聴取・比較・選択に要した時間）
                 "selection_seconds": selection_seconds,
                 # 世代生成所要時間: ボタン押下〜音声提示までの計算時間（待ち時間の評価用）
@@ -290,16 +530,22 @@ class IECInterface:
     def generate_random_baseline(
         self,
         prompt: str,
+        x_T_seed_str: str = "",
         progress=gr.Progress()
-    ) -> Tuple[List, str, str]:
+    ) -> Tuple[List, str, str, str]:
         """ランダム生成ベースライン（進化なし）の1ラウンドを生成する。
 
         Exp 5 の対照条件用インターフェース: 選択履歴・前ラウンドの情報を一切
         参照せず、毎回プロンプトプールから独立にサンプリングして音声を生成する。
         IEC 駆動の進化（選択→淘汰→交叉→変異）と比較するためのベースライン。
 
+        x_T_seed_str を指定すると、その seed から x_T を再現する。x_T選択フェーズの
+        winner seed をここに渡せば「x_T を制御した上で進化計算の有無だけが異なる」
+        比較ができる。空欄の場合はランダムなseedを自動生成し、入力欄に書き戻す
+        （以後のラウンドで再利用できるようにするため）。
+
         Returns:
-            (音声リスト, 情報テキスト, ステータスメッセージ)
+            (音声リスト, 情報テキスト, ステータスメッセージ, x_T seed入力欄の値)
         """
         progress(0, desc="ランダム個体群を生成中...")
         compute_started_at = datetime.now()
@@ -307,9 +553,19 @@ class IECInterface:
 
         try:
             effective_prompt = prompt.strip() if prompt.strip() else None
+
+            x_T_seed: Optional[int] = None
+            if x_T_seed_str.strip():
+                try:
+                    x_T_seed = int(x_T_seed_str.strip())
+                except ValueError:
+                    pass
+
             self.baseline_results = self.iec_system.generate_random_baseline_population(
                 prompt=effective_prompt,
+                x_T_seed=x_T_seed,
             )
+            used_x_T_seed = self.baseline_results[0][0].metadata.get("x_T_seed")
 
             progress(0.7, desc="音声を保存中...")
             self.baseline_audio_paths = self.iec_system.save_generation_audio(
@@ -327,6 +583,7 @@ class IECInterface:
                 "round": self._baseline_round,
                 "population_size": len(self.baseline_results),
                 "compute_seconds": compute_seconds,
+                "x_T_seed": used_x_T_seed,
             })
 
             progress(1.0, desc="完了!")
@@ -336,17 +593,19 @@ class IECInterface:
                 f"- **ラウンド**: {self._baseline_round}\n"
                 f"- **個体数**: {len(self.baseline_results)}\n"
                 f"- **セッションID**: {self.session_id}\n"
+                f"- **x_T seed**: {used_x_T_seed}\n"
                 "- *進化機構は使用しません。各ラウンドはプールからの独立サンプリングです*"
             )
             message = f"🎲 ランダム個体群（ラウンド {self._baseline_round}）を生成しました（進化なし・ベースライン）"
-            return audio_list, info, message
+            seed_str = str(used_x_T_seed)
+            return audio_list, info, message, seed_str
 
         except Exception as e:
             error_msg = f"エラーが発生しました: {str(e)}"
             print(error_msg)
             import traceback
             traceback.print_exc()
-            return self.baseline_audio_paths, "", error_msg
+            return self.baseline_audio_paths, "", error_msg, x_T_seed_str
 
     def rollback_generation(self, steps: int = 1) -> Tuple[List, str, str]:
         """
@@ -389,6 +648,34 @@ class IECInterface:
             print(error_msg)
             return self.current_audio_paths, self._get_generation_info(), error_msg
     
+    def generate_long_audio(self, pop_sel: list, duration: float):
+        """選択した個体の CLAP 埋め込みで長尺音声を生成し、(path, status) を返す。"""
+        if not pop_sel or len(pop_sel) != 1:
+            return None, "⚠️ 個体を1つだけ選択してください"
+        idx = pop_sel[0]
+        if not self.current_results or idx >= len(self.current_results):
+            return None, "⚠️ 有効な個体が選択されていません"
+        genotype = self.current_results[idx][0]
+        if not isinstance(genotype, ConditioningGenotype):
+            return None, "⚠️ Conditioning モードの個体のみ対応しています"
+        try:
+            audio_path = (
+                self.current_audio_paths[idx]
+                if self.current_audio_paths and idx < len(self.current_audio_paths)
+                else None
+            )
+            wf = self.iec_system.generate_long_audio_from_conditioning_genotype(
+                genotype, duration, audio_path=audio_path)
+            audio_data = wf[0, 0] if wf.ndim == 3 else wf[0]
+            import soundfile as _sf
+            path = os.path.join(
+                self.session_dir, f"long_{duration:.0f}s_ind{idx}.wav"
+            )
+            _sf.write(path, audio_data, samplerate=16000)
+            return path, f"✅ 個体{idx} を {duration:.0f}秒で生成しました"
+        except Exception as e:
+            return None, f"❌ エラー: {e}"
+
     def save_session(self) -> str:
         """
         セッションを保存
@@ -509,35 +796,43 @@ class IECInterface:
             alpha = meta.get("slerp_alpha", meta.get("crossover_alpha", 0.0))
             sigma = meta.get("sigma", 0.0)
             init = meta.get("initialization", "")
-            lines = []
-            if is_elite:
-                lines.append(f"⭐ エリート保存")
-            if init == "slerp_prompt":
-                lines.append(f"🎲 B-2 SLERP初期化")
-                lines.append(f"　α={alpha:.2f}  ランダム: {rand_prompt[:30]}")
-            elif init == "random_baseline":
-                lines.append("🎲 ランダム生成（進化なし・ベースライン）")
-                if base_prompt:
-                    lines.append(f"　α={alpha:.2f}  ランダム: {rand_prompt[:30]}")
-                else:
-                    lines.append(f"　プロンプト: {rand_prompt[:30]}")
-            elif op == "crossover_conditioning_slerp":
+            ep = "⭐ " if is_elite else ""
+            # 1行目: 操作種別 + 主要パラメータ（elite prefix を先頭に統合）
+            if op == "crossover_conditioning_slerp":
                 p1_idx = _fmt_pop_idx(meta.get("crossover_parent1_pop_index"))
                 p2_idx = _fmt_pop_idx(meta.get("crossover_parent2_pop_index"))
-                lines.append(f"🧬 SLERP交叉")
-                lines.append(f"　親: {p1_idx} × {p2_idx}  α={alpha:.2f}")
-            elif op == "mutate_conditioning_gaussian":
-                parent_idx = _fmt_pop_idx(meta.get("parent_pop_index"))
-                lines.append(f"🔀 突然変異")
-                lines.append(f"　親: {parent_idx}  σ={sigma:.4f}")
+                op_line = f"{ep}🧬 SLERP交叉  {p1_idx}×{p2_idx}  α={alpha:.2f}"
             elif op == "crossover_then_mutate":
                 p1_idx = _fmt_pop_idx(meta.get("crossover_parent1_pop_index"))
                 p2_idx = _fmt_pop_idx(meta.get("crossover_parent2_pop_index"))
-                lines.append(f"🧬 SLERP交叉＋突然変異")
-                lines.append(f"　親: {p1_idx} × {p2_idx}  α={alpha:.2f}  σ={sigma:.4f}")
+                mu = meta.get("mu", 0.0)
+                op_line = f"{ep}🧬 交叉＋変異  {p1_idx}×{p2_idx}  α={alpha:.2f}  μ={mu:.3f}"
+            elif op == "micro_slerp_mutate":
+                mu = meta.get("mu", 0.0)
+                parent_idx = _fmt_pop_idx(meta.get("parent_pop_index"))
+                op_line = f"{ep}🔀 変異  親:{parent_idx}  μ={mu:.3f}"
+            elif op == "random_sample":
+                op_line = f"{ep}🎲 B-2  α={alpha:.2f}  {rand_prompt[:22]}"
+            elif op == "random_sample_b1":
+                op_line = f"{ep}🎲 B-1  α={alpha:.2f}"
+            elif op == "mutate_conditioning_gaussian":
+                parent_idx = _fmt_pop_idx(meta.get("parent_pop_index"))
+                op_line = f"{ep}🔀 変異  親:{parent_idx}  σ={sigma:.4f}"
+            elif init == "slerp_prompt" and base_prompt:
+                op_line = f"{ep}🎲 B-2初期化  α={alpha:.2f}  {rand_prompt[:22]}"
+            elif init == "slerp_prompt":
+                op_line = f"{ep}🎲 B-2初期化  {rand_prompt[:28]}"
+            elif init == "random_baseline":
+                op_line = f"{ep}🎲 ベースライン  {rand_prompt[:28]}"
+            elif is_elite:
+                op_line = "⭐ エリート保存"
+            else:
+                op_line = "情報なし"
+            # 2行目: ベースプロンプト（常に存在する）
+            lines = [op_line]
             if base_prompt:
                 lines.append(f"📝 {base_prompt[:40]}")
-            return "\n".join(lines) if lines else "情報なし"
+            return "\n".join(lines)
 
         if isinstance(genotype, StyleTransferGenotype):
             lines.append("🎨 スタイル転送")
@@ -657,6 +952,9 @@ def create_gradio_interface(
     """
     Gradio UIを作成
     """
+    # x_T選択フェーズの最大候補数。スライダー範囲(4-10)に合わせる
+    SEED_SELECTION_MAX_SIZE = 10
+
     # インターフェースの初期化
     interface = IECInterface(
         model_name=model_name,
@@ -707,7 +1005,7 @@ def create_gradio_interface(
                             )
                             ga_mode_radio = gr.Radio(
                                 choices=["latent", "transform", "z0", "conditioning"],
-                                value="latent",
+                                value="conditioning",
                                 label="GA モード",
                                 info="latent: 潜在ノイズを直接進化 / transform: 変換行列を進化 / z0: DDIM逆拡散潜在表現を進化 / conditioning: CLAP条件付けベクトルを進化（意味空間探索）"
                             )
@@ -716,20 +1014,20 @@ def create_gradio_interface(
                                 minimum=0.0, maximum=1.0, value=0.3, step=0.05,
                                 label="初期変異強度",
                             )
-                            with gr.Group() as transform_init_group:
+                            with gr.Group(visible=False) as transform_init_group:
                                 transform_init_std_slider = gr.Slider(
                                     minimum=0.01, maximum=1.0, value=0.3, step=0.05,
                                     label="変換行列の初期摂動強度",
                                 )
                                 base_noise_seed_input = gr.Textbox(
                                     label="ベースノイズ seed (空欄でランダム)",
-                                    placeholder="例: 42", value=""
+                                    placeholder="例: 42", value="42"
                                 )
-                            with gr.Group(visible=False) as conditioning_init_group:
+                            with gr.Group(visible=True) as conditioning_init_group:
                                 cond_slerp_alpha_slider = gr.Slider(
-                                    minimum=0.0, maximum=0.7, value=0.5, step=0.01,
+                                    minimum=0.0, maximum=0.7, value=0.4, step=0.01,
                                     label="初期多様性 α (B-2 SLERP強度)",
-                                    info="0=全個体が同一, 0.5=推奨（実験で最良の収束を確認）, 0.7以上=base prompt の意味が薄れる"
+                                    info="0=全個体が同一, 0.4=推奨デフォルト, 0.5=実験で最良の収束を確認, 0.7以上=base prompt の意味が薄れる"
                                 )
                                 cond_x_T_seed_input = gr.Textbox(
                                     label="固定ノイズ x_T の seed (空欄でランダム)",
@@ -737,13 +1035,39 @@ def create_gradio_interface(
                                 )
                             init_button = gr.Button("🎲 初期個体群を生成", variant="primary", size="lg")
 
+                        with gr.Group(visible=True) as seed_selection_group:
+                            gr.Markdown("### 🎯 x_T選択 (初期ノイズ選択フェーズ・Conditioningモード専用)")
+                            gr.Markdown(
+                                "全候補は同じプロンプト条件で、初期ノイズ x_T だけが異なります。"
+                                "好きな音を1つ選ぶと、その x_T が以後の世代で共有されます。"
+                            )
+                            seed_selection_n_slider = gr.Slider(
+                                minimum=4, maximum=10, value=8, step=1,
+                                label="x_T候補数 N",
+                            )
+                            seed_selection_button = gr.Button("🎯 x_T候補を生成", variant="secondary")
+                            seed_selection_status = gr.Textbox(
+                                label="x_T選択ステータス", value="", interactive=False)
+                            seed_selection_audio_components = []
+                            with gr.Row():
+                                for i in range(SEED_SELECTION_MAX_SIZE):
+                                    seed_selection_audio_components.append(
+                                        gr.Audio(label=f"候補 {i}", type="filepath",
+                                                 interactive=False, visible=(i < 8))
+                                    )
+                            seed_selection_radio = gr.Radio(choices=[], label="採用する音を1つ選択")
+                            seed_select_button = gr.Button(
+                                "✅ 選んだx_TでIECを開始", variant="primary")
+
                         with gr.Group(visible=True):
                             gr.Markdown("### ⚙️ 進化パラメータ")
                             mutation_rate_slider = gr.Slider(
+                                visible=False,
                                 minimum=0.0, maximum=1.0, value=0.3, step=0.05,
                                 label="突然変異率 (潜在ノイズモード用)",
                             )
                             mutation_strength_slider = gr.Slider(
+                                visible=False,
                                 minimum=0.0, maximum=0.5, value=0.15, step=0.05,
                                 label="突然変異強度 (潜在ノイズ/z0モード用)",
                             )
@@ -754,29 +1078,54 @@ def create_gradio_interface(
                                     label="変異適用確率 p_mut (Conditioning モード)",
                                     info="交叉後の個体に Micro-SLERP 変異を適用する確率（0.5=推奨、実験で停滞抑制効果を確認）"
                                 )
-                                mutation_mu_slider = gr.Slider(
-                                    minimum=0.01, maximum=0.25, value=0.10, step=0.01,
-                                    label="変異強度 μ 上限 (Conditioning モード)",
-                                    info="Micro-SLERP の μ ~ Uniform(0.05, この値) で変位量を制御"
-                                )
+                                with gr.Row():
+                                    mutation_mu_min_slider = gr.Slider(
+                                        minimum=0.01, maximum=0.30, value=0.10, step=0.01,
+                                        label="変異強度 μ 下限 (Conditioning モード)",
+                                        info="Micro-SLERP の μ ~ Uniform(下限, 上限)"
+                                    )
+                                    mutation_mu_max_slider = gr.Slider(
+                                        minimum=0.01, maximum=0.40, value=0.25, step=0.01,
+                                        label="変異強度 μ 上限 (Conditioning モード)",
+                                        info="で変位量を制御"
+                                    )
                                 random_sample_count_slider = gr.Slider(
                                     minimum=0, maximum=3, value=1, step=1,
                                     label="ランダムサンプル数 (Conditioning モード)",
                                     info="毎世代プールから新規注入する探索的個体数"
                                 )
+                                random_b1_count_slider = gr.Slider(
+                                    minimum=0, maximum=3, value=0, step=1,
+                                    label="うちSLERP B-1個体数 (超球面一様サンプル)",
+                                    info="ランダムサンプルのうち、プロンプトプール(B-2)ではなく超球面一様ベクトルとSLERPする個体数（既定0=全てB-2）"
+                                )
+                                x_T_mode_radio = gr.Radio(
+                                    choices=["shared", "elite_keep", "inherit"],
+                                    value="inherit",
+                                    label="ノイズ(x_T)の扱い (Conditioning モード)",
+                                    info="shared: 全個体・全世代で同一ノイズ / elite_keep: エリートは前音を維持・他は独立 / inherit(既定): エリート・交叉は前世代/親のx_Tを継承",
+                                )
+                                weighted_b2_checkbox = gr.Checkbox(
+                                    value=False,
+                                    label="加重B-2サンプリング (CLAP高スコアを優先)",
+                                    info="ONにすると、プロンプトプールからのB-2 SLERPサンプリングをCLAP自己整合スコアに比例した確率で行います。AudioLDMが得意なプロンプトが優先的に選ばれます。",
+                                )
                             elite_count_slider = gr.Slider(
-                                minimum=0, maximum=3, value=2, step=1,
+                                minimum=0, maximum=3, value=1, step=1,
                                 label="エリート保存数",
                             )
                             fresh_count_slider = gr.Slider(
+                                visible=False,
                                 minimum=0, maximum=3, value=1, step=1,
                                 label="DDIM 新鮮注入数 (z0モード専用)",
                             )
                             crossover_mode_radio = gr.Radio(
+                                visible=False,
                                 choices=["z0", "zt"], value="z0",
                                 label="交叉モード (z0モード専用)",
                             )
                             sdedit_strength_slider = gr.Slider(
+                                visible=False,
                                 minimum=0.0, maximum=0.5, value=0.0, step=0.05,
                                 label="SDEdit強度 (z0モード専用)",
                             )
@@ -787,6 +1136,14 @@ def create_gradio_interface(
                             with gr.Row():
                                 rollback_button = gr.Button("🔙 1世代戻る")
                                 save_button = gr.Button("💾 セッション保存")
+                            with gr.Group(visible=True) as return_to_gacha_group:
+                                gr.Markdown(
+                                    "下の個体群から1つだけ選択した状態で押すと、"
+                                    "その個体のCLAP embeddingを c* として継承し、"
+                                    "x_T選択フェーズ（上の🎯 x_T選択）に戻ります。"
+                                )
+                                return_to_gacha_button = gr.Button(
+                                    "🔄 ガチャに戻る (選択個体のCLAPでx_T再選択)")
 
                     with gr.Column(scale=1):
                         info_display = gr.Markdown("### 📊 情報\n準備中...")
@@ -838,30 +1195,48 @@ def create_gradio_interface(
                     return (
                         gr.update(visible=(mode == "transform")),
                         gr.update(visible=(mode == "conditioning")),
+                        gr.update(visible=(mode == "latent")),
+                        gr.update(visible=(mode != "conditioning")),
+                        gr.update(visible=(mode == "conditioning")),
+                        gr.update(visible=(mode == "z0")),
+                        gr.update(visible=(mode == "z0")),
+                        gr.update(visible=(mode == "z0")),
+                        gr.update(visible=(mode == "conditioning")),
+                        gr.update(visible=(mode == "conditioning")),
                     )
 
                 ga_mode_radio.change(
                     fn=_on_ga_mode_change,
                     inputs=[ga_mode_radio],
-                    outputs=[transform_init_group, conditioning_init_group],
+                    outputs=[
+                        transform_init_group, conditioning_init_group,
+                        mutation_rate_slider, mutation_strength_slider, conditioning_evo_group,
+                        fresh_count_slider, crossover_mode_radio, sdedit_strength_slider,
+                        seed_selection_group, return_to_gacha_group,
+                    ],
                 )
 
                 def init_wrapper(prompt, variation_strength, ga_mode, transform_init_std,
-                                 base_noise_seed_str, cond_slerp_alpha, cond_x_T_seed_str):
-                    audio_list, info, message = interface.initialize_generation(
+                                 base_noise_seed_str, cond_slerp_alpha, cond_x_T_seed_str,
+                                 x_T_mode, weighted_b2):
+                    audio_list, info, message, seed_str = interface.initialize_generation(
                         prompt, variation_strength, ga_mode, transform_init_std,
-                        base_noise_seed_str, cond_slerp_alpha, cond_x_T_seed_str)
-                    return _pack_outputs(audio_list, info, message) + [""]
+                        base_noise_seed_str, cond_slerp_alpha, cond_x_T_seed_str,
+                        x_T_mode=x_T_mode, weighted_b2=weighted_b2)
+                    return _pack_outputs(audio_list, info, message) + [""] + [seed_str]
 
                 def evolve_wrapper(selected_labels, mutation_rate, mutation_strength,
                                    elite_count, fresh_count, crossover_mode, sdedit_strength,
-                                   p_mut, mutation_mu_max, random_sample_count):
+                                   p_mut, mutation_mu_min, mutation_mu_max, random_sample_count,
+                                   random_b1_count, x_T_mode, weighted_b2):
                     selected_indices = [int(label.split()[-1]) for label in selected_labels]
                     audio_list, info, message, conv_text = interface.evolve_generation(
                         selected_indices, mutation_rate, mutation_strength, elite_count, fresh_count,
                         crossover_mode=crossover_mode, sdedit_strength=sdedit_strength,
-                        p_mut=p_mut, mutation_mu_max=mutation_mu_max,
-                        random_sample_count=int(random_sample_count))
+                        p_mut=p_mut, mutation_mu_min=mutation_mu_min, mutation_mu_max=mutation_mu_max,
+                        random_sample_count=int(random_sample_count),
+                        random_b1_count=int(random_b1_count),
+                        x_T_mode=x_T_mode, weighted_b2=weighted_b2)
                     return _pack_outputs(audio_list, info, message) + [conv_text]
 
                 def rollback_wrapper():
@@ -870,6 +1245,40 @@ def create_gradio_interface(
 
                 def save_wrapper():
                     return interface.save_session()
+
+                def seed_selection_wrapper(prompt, n_candidates, x_T_seed_str):
+                    audio_list, status, seed_str = interface.run_seed_selection(
+                        prompt, n_candidates, x_T_seed_str)
+                    n = len(audio_list)
+                    audio_updates = []
+                    for i in range(SEED_SELECTION_MAX_SIZE):
+                        if i < n:
+                            audio_updates.append(gr.update(value=audio_list[i], visible=True))
+                        else:
+                            audio_updates.append(gr.update(value=None, visible=False))
+                    choices = [f"候補 {i}" for i in range(n)]
+                    return audio_updates + [gr.update(choices=choices, value=None), status, seed_str]
+
+                def seed_select_wrapper(winner_label, cond_slerp_alpha, weighted_b2):
+                    audio_list, info, message, seed_str = interface.select_seed_winner(
+                        winner_label, cond_slerp_alpha, weighted_b2=weighted_b2)
+                    return (_pack_outputs(audio_list, info, message)
+                            + [""] + [seed_str]
+                            + [gr.update(visible=False, value="shared")])
+
+                def return_to_gacha_wrapper(selected_labels, n_candidates):
+                    selected_indices = [int(label.split()[-1]) for label in selected_labels]
+                    audio_list, status, seed_str = interface.return_to_gacha(
+                        selected_indices, n_candidates)
+                    n = len(audio_list)
+                    audio_updates = []
+                    for i in range(SEED_SELECTION_MAX_SIZE):
+                        if i < n:
+                            audio_updates.append(gr.update(value=audio_list[i], visible=True))
+                        else:
+                            audio_updates.append(gr.update(value=None, visible=False))
+                    choices = [f"候補 {i}" for i in range(n)]
+                    return audio_updates + [gr.update(choices=choices, value=None), status, seed_str]
 
                 all_outputs = (audio_components
                                + [selection_group, info_display, status_display, audio_paths_state]
@@ -880,19 +1289,39 @@ def create_gradio_interface(
                     fn=init_wrapper,
                     inputs=[prompt_input, variation_strength_slider, ga_mode_radio,
                             transform_init_std_slider, base_noise_seed_input,
-                            cond_slerp_alpha_slider, cond_x_T_seed_input],
-                    outputs=all_outputs
+                            cond_slerp_alpha_slider, cond_x_T_seed_input,
+                            x_T_mode_radio, weighted_b2_checkbox],
+                    outputs=all_outputs + [cond_x_T_seed_input]
                 )
                 evolve_button.click(
                     fn=evolve_wrapper,
                     inputs=[selection_group, mutation_rate_slider, mutation_strength_slider,
                             elite_count_slider, fresh_count_slider,
                             crossover_mode_radio, sdedit_strength_slider,
-                            p_mut_slider, mutation_mu_slider, random_sample_count_slider],
+                            p_mut_slider, mutation_mu_min_slider, mutation_mu_max_slider,
+                            random_sample_count_slider, random_b1_count_slider,
+                            x_T_mode_radio, weighted_b2_checkbox],
                     outputs=all_outputs
                 )
                 rollback_button.click(fn=rollback_wrapper, inputs=[], outputs=all_outputs)
                 save_button.click(fn=save_wrapper, inputs=[], outputs=[status_display])
+
+                seed_selection_button.click(
+                    fn=seed_selection_wrapper,
+                    inputs=[prompt_input, seed_selection_n_slider, cond_x_T_seed_input],
+                    outputs=seed_selection_audio_components + [seed_selection_radio, seed_selection_status, cond_x_T_seed_input],
+                )
+                seed_select_button.click(
+                    fn=seed_select_wrapper,
+                    inputs=[seed_selection_radio, cond_slerp_alpha_slider, weighted_b2_checkbox],
+                    outputs=all_outputs + [cond_x_T_seed_input, x_T_mode_radio],
+                )
+
+                return_to_gacha_button.click(
+                    fn=return_to_gacha_wrapper,
+                    inputs=[selection_group, seed_selection_n_slider],
+                    outputs=seed_selection_audio_components + [seed_selection_radio, seed_selection_status, cond_x_T_seed_input],
+                )
 
             # ===== スタイル変換タブ =====
             with gr.Tab("スタイル変換"):
@@ -1038,6 +1467,18 @@ def create_gradio_interface(
                                 placeholder="例: music",
                                 value=""
                             )
+                            with gr.Row():
+                                baseline_x_T_seed_input = gr.Textbox(
+                                    label="固定x_T seed (空欄でランダム)",
+                                    placeholder="例: 42", value="",
+                                    scale=3,
+                                )
+                                baseline_copy_seed_button = gr.Button(
+                                    "🔗 x_T選択フェーズのseedを使用", scale=2)
+                            gr.Markdown(
+                                "「通常生成」タブのx_T選択フェーズで選んだseedをコピーすれば、"
+                                "x_T を固定した状態で進化なしランダム生成（複数世代）と比較できます。"
+                            )
                             baseline_generate_button = gr.Button(
                                 "🎲 ランダム個体群を生成（進化なし）", variant="primary", size="lg")
 
@@ -1075,9 +1516,10 @@ def create_gradio_interface(
                     status_outputs = _get_baseline_status_list()
                     return [info, message] + audio_outputs + status_outputs
 
-                def baseline_generate_wrapper(prompt):
-                    audio_list, info, message = interface.generate_random_baseline(prompt)
-                    return _pack_baseline_outputs(audio_list, info, message)
+                def baseline_generate_wrapper(prompt, x_T_seed_str):
+                    audio_list, info, message, seed_str = interface.generate_random_baseline(
+                        prompt, x_T_seed_str)
+                    return _pack_baseline_outputs(audio_list, info, message) + [seed_str]
 
                 baseline_all_outputs = (
                     [baseline_info_display, baseline_status_display]
@@ -1087,8 +1529,13 @@ def create_gradio_interface(
 
                 baseline_generate_button.click(
                     fn=baseline_generate_wrapper,
-                    inputs=[baseline_prompt_input],
-                    outputs=baseline_all_outputs
+                    inputs=[baseline_prompt_input, baseline_x_T_seed_input],
+                    outputs=baseline_all_outputs + [baseline_x_T_seed_input]
+                )
+                baseline_copy_seed_button.click(
+                    fn=lambda seed: seed,
+                    inputs=[cond_x_T_seed_input],
+                    outputs=[baseline_x_T_seed_input],
                 )
 
     return demo

@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -c \"from audioldm.iec_pipeline import AudioLDM_IEC; from audioldm.iec import LatentZ0Genotype, crossover_z0_slerp, mutate_z0_gaussian; print\\('import OK'\\)\")"
+      "Bash(python -c \"from audioldm.iec_pipeline import AudioLDM_IEC; from audioldm.iec import LatentZ0Genotype, crossover_z0_slerp, mutate_z0_gaussian; print\\('import OK'\\)\")",
+      "Bash(awk 'NR==1216,NR==1350' /workspaces/AudioLDM/audioldm/iec_pipeline.py)",
+      "Bash(python scripts/apply_eval_results.py --results scripts/outputs/prompt_clap_consistency_m/results.json --min_score 0.25 --max_std 0.07)"
     ]
   }
 }

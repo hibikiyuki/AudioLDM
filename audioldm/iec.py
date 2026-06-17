@@ -396,6 +396,7 @@ class IECPopulation:
                     "id": individual.id,
                     "generation": individual.generation,
                     "fitness": individual.fitness,
+                    "seed": individual.seed,
                     "metadata": individual.metadata
                 }
                 gen_data["individuals"].append(ind_data)
@@ -822,6 +823,22 @@ def slerp_conditioning(
         s1 = torch.sin(t * theta) / sin_theta
         result = s0 * v0 + s1 * v1
     return result.reshape(shape).to(c0.dtype)
+
+
+def sample_random_unit_embedding(
+    shape: Tuple[int, ...],
+    device: torch.device,
+    dtype: torch.dtype,
+    generator: Optional[torch.Generator] = None,
+) -> torch.Tensor:
+    """超球面上の一様サンプル（SLERP B-1 用）。
+
+    CLAP embedding と同形状・L2正規化済みのランダムベクトルを返す。
+    """
+    v = torch.randn(shape, device=device, dtype=dtype, generator=generator)
+    v_flat = v.reshape(-1)
+    v_flat = v_flat / (torch.norm(v_flat) + 1e-8)
+    return v_flat.reshape(shape)
 
 
 def mutate_conditioning_gaussian(
