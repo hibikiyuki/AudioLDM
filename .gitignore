@@ -15,3 +15,5 @@ local/
 .devcontainer/
 paper/
 .cache/
+# ローカル専用（マシン固有パス・許可設定を含むためコミットしない）
+.claude/settings.local.json

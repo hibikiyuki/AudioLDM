@@ -23,6 +23,7 @@ UI は一切含まない。
 import gradio as gr
 
 from audioldm.iec_gradio import IECInterface
+from audioldm.prompt_pool import DEFAULT_DEMO_PROMPT, DEMO_PROMPT_EXAMPLES
 
 
 # x_Tガチャ候補の最大数（2列グリッド × 5行）。N スライダー範囲(4-10)に合わせる。
@@ -68,6 +69,131 @@ CUSTOM_CSS = """
 /* パネル見出し */
 .panel-head { font-weight: 600; margin-bottom: 4px; }
 footer { display: none !important; }
+
+/* ===== 区間スライダー（つまみ2つ・自作） ===== */
+.rs-box { margin: 6px 4px 2px 4px; }
+.rs-label {
+    font-size: 12px; color: var(--body-text-color-subdued);
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 2px;
+}
+.rs-readout { font-weight: 600; color: var(--body-text-color); }
+.rs-wrap { position: relative; height: 30px; }
+.rs-track {
+    position: absolute; top: 12px; left: 0; right: 0; height: 6px;
+    border-radius: 3px; background: var(--border-color-primary);
+}
+.rs-range {
+    position: absolute; top: 12px; height: 6px; border-radius: 3px;
+    background: var(--color-accent, #f97316);
+}
+.rs-wrap input[type=range] {
+    position: absolute; top: 4px; left: 0; width: 100%; height: 22px; margin: 0;
+    -webkit-appearance: none; appearance: none;
+    background: transparent; pointer-events: none;
+}
+.rs-wrap input[type=range]:focus { outline: none; }
+/* トラックはCSSで描くので入力自体のトラックは透明。つまみだけ操作可能にする */
+.rs-wrap input[type=range]::-webkit-slider-runnable-track {
+    background: transparent; border: none; height: 22px;
+}
+.rs-wrap input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; pointer-events: auto;
+    width: 16px; height: 16px; margin-top: 3px; border-radius: 50%;
+    background: var(--color-accent, #f97316); border: 2px solid #fff;
+    cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.4);
+}
+.rs-wrap input[type=range]::-moz-range-track {
+    background: transparent; border: none; height: 22px;
+}
+.rs-wrap input[type=range]::-moz-range-thumb {
+    pointer-events: auto;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--color-accent, #f97316); border: 2px solid #fff;
+    cursor: pointer;
+}
+/* Gradioの数値入力はDOMに残したまま視覚的に隠す（JSから値を同期するため） */
+.rs-hidden {
+    position: absolute !important; width: 1px !important; height: 1px !important;
+    padding: 0 !important; margin: -1px !important; overflow: hidden !important;
+    clip: rect(0,0,0,0) !important; white-space: nowrap !important; border: 0 !important;
+}
+"""
+
+# 区間スライダー本体。Gradio 4.44 には RangeSlider が無いため自作する。
+# 2本の input[type=range] を重ね、つまみだけ pointer-events:auto にして
+# 「1ウィジェットで開始・終了の両端を指定」を実現する。
+RANGE_SLIDER_HTML = """
+<div class="rs-box" id="regen_range_widget">
+  <div class="rs-label">
+    <span>再生成する区間（区間外は固定）</span>
+    <span class="rs-readout" id="rsReadout">50% – 100%</span>
+  </div>
+  <div class="rs-wrap">
+    <div class="rs-track"></div>
+    <div class="rs-range" id="rsRange"></div>
+    <input type="range" id="rsStart" min="0" max="100" step="5" value="50"
+           aria-label="再生成する区間の開始">
+    <input type="range" id="rsEnd" min="0" max="100" step="5" value="100"
+           aria-label="再生成する区間の終了">
+  </div>
+</div>
+"""
+
+# 区間スライダー → 隠しGradio数値入力への同期。
+# Gradio はコンポーネントを非同期マウントするため、要素が現れるまでポーリングする。
+RANGE_SLIDER_JS = """
+() => {
+  const MINGAP = 5;
+  function setGradioNumber(wrapId, val) {
+    const wrap = document.getElementById(wrapId);
+    if (!wrap) return;
+    const input = wrap.querySelector('input');
+    if (!input) return;
+    if (String(input.value) === String(val)) return;
+    // ネイティブsetter経由で入れないとフレームワーク側が変更を検知しないことがある
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, String(val));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  function init() {
+    const s = document.getElementById('rsStart');
+    const e = document.getElementById('rsEnd');
+    const bar = document.getElementById('rsRange');
+    const out = document.getElementById('rsReadout');
+    if (!s || !e || !bar || !out) return false;
+    if (s.dataset.rsBound === '1') return true;
+    s.dataset.rsBound = '1';
+    function render() {
+      const a = parseInt(s.value, 10), b = parseInt(e.value, 10);
+      bar.style.left = a + '%';
+      bar.style.width = Math.max(0, b - a) + '%';
+      out.textContent = a + '% – ' + b + '%';
+      setGradioNumber('regen_start_num', a);
+      setGradioNumber('regen_end_num', b);
+    }
+    s.addEventListener('input', () => {
+      let a = parseInt(s.value, 10);
+      const b = parseInt(e.value, 10);
+      if (a > b - MINGAP) { a = Math.max(0, b - MINGAP); s.value = a; }
+      render();
+    });
+    e.addEventListener('input', () => {
+      let b = parseInt(e.value, 10);
+      const a = parseInt(s.value, 10);
+      if (b < a + MINGAP) { b = Math.min(100, a + MINGAP); e.value = b; }
+      render();
+    });
+    render();
+    return true;
+  }
+  if (!init()) {
+    const iv = setInterval(() => { if (init()) clearInterval(iv); }, 200);
+    setTimeout(() => clearInterval(iv), 15000);
+  }
+}
 """
 
 
@@ -75,22 +201,48 @@ def create_demo_interface(
     model_name: str = "audioldm-m-full",
     population_size: int = 6,
     duration: float = 5.0,
+    mode: str = "two_axis",
+    condition: str = None,
+    participant_id: str = None,
+    target_prompt_id: str = None,
+    order: str = None,
+    output_dir: str = "./output/iec_gradio",
 ) -> gr.Blocks:
-    """CLAP-IEC デモ専用インターフェースを構築する。"""
+    """CLAP-IEC デモ専用インターフェースを構築する。
+
+    mode:
+      - "two_axis"   : 提案手法（x_Tガチャ ↔ CLAP-IEC の2軸交互探索）。
+      - "single_axis": 対照条件（CLAP-IEC 単独）。x_T はシステムが
+        ランダムに1つ固定（shared）し、ユーザは意味軸 c のみを進化させる。
+        左パネル（x_Tガチャ）と「ガチャに戻る」を無効化する。
+    """
+    is_single = (mode == "single_axis")
     interface = IECInterface(
         model_name=model_name,
         population_size=population_size,
         duration=duration,
+        output_dir=output_dir,
+        condition=condition,
+        participant_id=participant_id,
+        target_prompt_id=target_prompt_id,
+        order=order,
     )
     # デモは常に conditioning モードで動作する
     interface.iec_system.ga_mode = "conditioning"
     POP = population_size
 
-    with gr.Blocks(title="AudioLDM-IEC Demo", css=CUSTOM_CSS) as demo:
-        gr.Markdown(
-            "## 🎼 AudioLDM-IEC\n"
-            "**左**で音の質感（x_T）を選び → **右**で音楽的方向（CLAP）を進化させる。"
-        )
+    with gr.Blocks(title="AudioLDM-IEC Demo", css=CUSTOM_CSS,
+                   js=RANGE_SLIDER_JS) as demo:
+        if is_single:
+            gr.Markdown(
+                "## 🎼 AudioLDM-IEC（方法2）\n"
+                "プロンプトを決めて開始し、提示された候補から好みを選んで進化させる。"
+            )
+        else:
+            gr.Markdown(
+                "## 🎼 AudioLDM-IEC（方法1）\n"
+                "**左**で音の質感（x_T）を選び → **右**で音楽的方向（CLAP）を進化させる。"
+            )
 
         # 状態: ガチャ選択 = 単一 index (未選択は -1), IEC選択 = index のリスト
         cand_selected_state = gr.State(-1)
@@ -99,27 +251,46 @@ def create_demo_interface(
         with gr.Row(equal_height=False):
 
             # ============================================================
-            # 左パネル: x_Tガチャ（音の質感）
+            # 左パネル: x_Tガチャ（音の質感）— 単軸条件(方法2)では非表示
             # ============================================================
-            with gr.Column(scale=1):
+            with gr.Column(scale=1, visible=not is_single):
                 gr.Markdown("### 🎯 x_Tガチャ — 音の質感を選ぶ", elem_classes=["panel-head"])
 
                 with gr.Row():
                     prompt_box = gr.Textbox(
-                        label="プロンプト", value="lofi hip hop",
-                        placeholder="例: atmospheric dark jazz with muted trumpet",
+                        label="プロンプト", value=DEFAULT_DEMO_PROMPT,
+                        placeholder="例: acoustic guitar, warm and gentle",
                         scale=3,
                     )
-                    n_slider = gr.Slider(
-                        minimum=4, maximum=MAX_CANDIDATES, value=6, step=1,
-                        label="候補数 N", scale=1,
+                    # 英語を思いつけない来場者向け。選ぶと prompt_box に流し込むだけで、
+                    # prompt_box 自体は手入力可能なまま残す。
+                    preset_dropdown = gr.Dropdown(
+                        choices=DEMO_PROMPT_EXAMPLES, value=DEFAULT_DEMO_PROMPT,
+                        label="例から選ぶ", filterable=False,
+                        allow_custom_value=False, scale=2,
                     )
                 with gr.Row():
                     seed_box = gr.Textbox(
                         label="x_T seed (空欄でランダム)", value="", placeholder="例: 42",
                         scale=2,
                     )
+                    n_slider = gr.Slider(
+                        minimum=4, maximum=MAX_CANDIDATES, value=6, step=1,
+                        label="候補数 N", scale=1,
+                    )
                     gacha_button = gr.Button("🎯 x_Tを生成", variant="primary", scale=1)
+                # 再生成する区間 [開始%, 終了%]。区間外は固定される。
+                #   50-100=後半 / 30-70=中間(両端固定) / 0-50=前半
+                # 見た目はつまみ2つの自作スライダー、値は下の隠し Number が保持する。
+                gr.HTML(RANGE_SLIDER_HTML)
+                regen_start_num = gr.Number(
+                    value=50, elem_id="regen_start_num",
+                    elem_classes=["rs-hidden"], show_label=False, container=False)
+                regen_end_num = gr.Number(
+                    value=100, elem_id="regen_end_num",
+                    elem_classes=["rs-hidden"], show_label=False, container=False)
+                variation_button = gr.Button(
+                    "🔁 選んだ区間を振り直す", variant="secondary")
 
                 # --- 候補グリッド（固定2列） ---
                 cand_cells, cand_audios, cand_buttons = [], [], []
@@ -149,6 +320,21 @@ def create_demo_interface(
             # ============================================================
             with gr.Column(scale=1):
                 gr.Markdown("### 🧬 CLAP-IEC — 音楽的方向を進化", elem_classes=["panel-head"])
+
+                # 単軸条件(方法2)用の開始パネル。x_T をランダム固定して直接IEC開始する。
+                with gr.Row(visible=is_single) as single_start_row:
+                    single_prompt_box = gr.Textbox(
+                        label="プロンプト", value=DEFAULT_DEMO_PROMPT,
+                        placeholder="例: acoustic guitar, warm and gentle",
+                        scale=3,
+                    )
+                    single_preset_dropdown = gr.Dropdown(
+                        choices=DEMO_PROMPT_EXAMPLES, value=DEFAULT_DEMO_PROMPT,
+                        label="例から選ぶ", filterable=False,
+                        allow_custom_value=False, scale=2,
+                    )
+                    single_start_button = gr.Button(
+                        "▶ 開始", variant="primary", scale=1)
 
                 with gr.Accordion("⚙️ 進化パラメータ", open=False):
                     with gr.Row():
@@ -197,7 +383,12 @@ def create_demo_interface(
 
                 with gr.Row():
                     evolve_button = gr.Button("🧬 次世代を生成", variant="primary", scale=2)
-                    back_button = gr.Button("🔄 ガチャに戻る", variant="secondary", scale=1)
+                    back_button = gr.Button(
+                        "🔄 ガチャに戻る", variant="secondary", scale=1, visible=not is_single)
+                    # 区間は左パネルの regen_start/end スライダーを共用する
+                    # （スライダーを重複配置すると被験者が混乱するため）
+                    lock_head_checkbox = gr.Checkbox(
+                        label="区間外を固定", value=False, scale=1, visible=not is_single)
                 iec_info = gr.Markdown("")
                 iec_status = gr.Textbox(
                     label="IEC状況", value="左でx_Tを選んでIECを開始してください",
@@ -273,12 +464,36 @@ def create_demo_interface(
             audio_list, msg, new_seed = interface.run_seed_selection(prompt, int(n), seed_str)
             return build_gacha_outputs(audio_list, msg, new_seed)
 
+        def do_variation_gacha(cand_sel, n, regen_start_pct, regen_end_pct):
+            # インペイントには参照となる既存の候補が必要なので、必ず1つ選ばせる
+            if cand_sel is None or cand_sel < 0:
+                noop = [gr.update() for _ in range(MAX_CANDIDATES * 3)]
+                return noop + [-1, "⚠️ 塗り直したい候補を1つ選択してください", gr.update()]
+            audio_list, msg, seed = interface.run_variation_gacha(
+                int(cand_sel), int(n),
+                float(regen_start_pct) / 100.0, float(regen_end_pct) / 100.0)
+            return build_gacha_outputs(audio_list, msg, seed)
+
         def do_start_iec(cand_sel, alpha, weighted):
             if cand_sel is None or cand_sel < 0:
                 noop = [gr.update() for _ in range(POP * 4)]
                 return noop + [[], "⚠️ x_T候補を1つ選択してください", gr.update(), gr.update()]
             audio_list, info, msg, _seed = interface.select_seed_winner(
                 f"候補 {cand_sel}", alpha, weighted_b2=weighted)
+            return build_pop_outputs(audio_list, info, msg, "")
+
+        def do_start_single(prompt, alpha, weighted):
+            # 単軸条件(方法2): x_T をランダムに1つ固定(shared)し、conditioning個体群を初期化する。
+            # ガチャ(Phase 1)を経由せず、ユーザは意味軸 c のみを進化させる。
+            audio_list, info, msg, _seed = interface.initialize_generation(
+                prompt=prompt,
+                variation_strength=0.0,
+                ga_mode="conditioning",
+                cond_slerp_alpha=float(alpha),
+                cond_x_T_seed_str="",
+                x_T_mode="shared",
+                weighted_b2=weighted,
+            )
             return build_pop_outputs(audio_list, info, msg, "")
 
         def do_evolve(pop_sel, elite, p_mut, mu_min, mu_max, rand_n, weighted):
@@ -298,12 +513,15 @@ def create_demo_interface(
             )
             return build_pop_outputs(audio_list, info, msg, conv)
 
-        def do_back_to_gacha(pop_sel, n):
+        def do_back_to_gacha(pop_sel, n, lock_region, regen_start_pct, regen_end_pct):
             if not pop_sel or len(pop_sel) != 1:
                 noop_cells = [gr.update() for _ in range(MAX_CANDIDATES * 3)]
                 return noop_cells + [
                     -1, "⚠️ c*として継承する個体を1つだけ選択してください", gr.update()]
-            audio_list, msg, seed = interface.return_to_gacha(pop_sel, int(n))
+            audio_list, msg, seed = interface.return_to_gacha(
+                pop_sel, int(n), lock_region=bool(lock_region),
+                regen_start=float(regen_start_pct) / 100.0,
+                regen_end=float(regen_end_pct) / 100.0)
             return build_gacha_outputs(audio_list, msg, seed)
 
         def do_generate_long(pop_sel, dur):
@@ -348,15 +566,37 @@ def create_demo_interface(
             btn.click(fn=make_pop_toggle(i), inputs=[pop_selected_state],
                       outputs=pop_buttons + [pop_selected_state])
 
+        # --- プロンプト例プルダウン → テキストボックス ---
+        # プルダウンは「入力補助」であり真の入力源ではない。値を流し込んだあとは
+        # テキストボックス側を自由に書き換えられる（生成時に読むのは常に textbox）。
+        def apply_preset(choice):
+            return gr.update() if not choice else gr.update(value=choice)
+
+        preset_dropdown.change(
+            fn=apply_preset, inputs=[preset_dropdown], outputs=[prompt_box])
+        single_preset_dropdown.change(
+            fn=apply_preset, inputs=[single_preset_dropdown],
+            outputs=[single_prompt_box])
+
         # --- メインアクションの結線 ---
         gacha_button.click(
             fn=do_generate_gacha,
             inputs=[prompt_box, n_slider, seed_box],
             outputs=gacha_outputs,
         )
+        variation_button.click(
+            fn=do_variation_gacha,
+            inputs=[cand_selected_state, n_slider, regen_start_num, regen_end_num],
+            outputs=gacha_outputs,
+        )
         start_iec_button.click(
             fn=do_start_iec,
             inputs=[cand_selected_state, alpha_slider, weighted_checkbox],
+            outputs=pop_outputs,
+        )
+        single_start_button.click(
+            fn=do_start_single,
+            inputs=[single_prompt_box, alpha_slider, weighted_checkbox],
             outputs=pop_outputs,
         )
         evolve_button.click(
@@ -367,7 +607,8 @@ def create_demo_interface(
         )
         back_button.click(
             fn=do_back_to_gacha,
-            inputs=[pop_selected_state, n_slider],
+            inputs=[pop_selected_state, n_slider, lock_head_checkbox,
+                    regen_start_num, regen_end_num],
             outputs=gacha_outputs,
         )
         long_gen_button.click(
@@ -379,19 +620,181 @@ def create_demo_interface(
     return demo
 
 
+def create_text_baseline_interface(
+    model_name: str = "audioldm-m-full",
+    population_size: int = 6,
+    duration: float = 5.0,
+    condition: str = None,
+    participant_id: str = None,
+    target_prompt_id: str = None,
+    order: str = None,
+    output_dir: str = "./output/iec_gradio",
+) -> gr.Blocks:
+    """テキスト手打ちベースライン専用インターフェース（ユーザスタディ 条件B）。
+
+    提案手法と同じ AudioLDM バックエンドで、プロンプト入力 → 生成（毎回新seedで
+    population_size 個）→ 試聴 → 書き換え → 再生成 のループを提供する。進化・選択の
+    次世代反映は行わない純粋な text-to-audio。ユーザは気に入った候補を最終候補として
+    確保し、最後に確定する。
+    """
+    interface = IECInterface(
+        model_name=model_name,
+        population_size=population_size,
+        duration=duration,
+        output_dir=output_dir,
+        condition=condition,
+        participant_id=participant_id,
+        target_prompt_id=target_prompt_id,
+        order=order,
+    )
+    interface.iec_system.ga_mode = "conditioning"
+    POP = population_size
+
+    with gr.Blocks(title="AudioLDM Text Baseline", css=CUSTOM_CSS) as demo:
+        gr.Markdown(
+            "## ⌨️ AudioLDM（方法2）\n"
+            "プロンプトを入力して生成 → 気に入った音を最終候補に。"
+            "思う音にならなければ**プロンプトを書き換えて再生成**してください。"
+        )
+
+        final_pick_state = gr.State(None)
+
+        with gr.Row():
+            prompt_box = gr.Textbox(
+                label="プロンプト", value="lofi hip hop",
+                placeholder="欲しい音を言葉で表現してください（例: warm mellow piano in a small room）",
+                scale=4,
+            )
+            gen_button = gr.Button("🎲 生成", variant="primary", scale=1)
+
+        # --- 候補グリッド（固定2列） ---
+        cells, audios, buttons = [], [], []
+        with gr.Column(elem_classes=["pop-grid"]):
+            for i in range(POP):
+                with gr.Group(elem_classes=["cell"], visible=False) as cell:
+                    audio = gr.Audio(
+                        type="filepath", show_label=False,
+                        show_download_button=True, show_share_button=False,
+                        interactive=False, waveform_options=gr.WaveformOptions(
+                            show_recording_waveform=False),
+                    )
+                    btn = gr.Button(f"★ 最終候補にする {i}", variant="secondary", size="sm")
+                cells.append(cell)
+                audios.append(audio)
+                buttons.append(btn)
+
+        status = gr.Textbox(
+            label="状況", value="プロンプトを入力して「生成」を押してください",
+            interactive=False, lines=2,
+        )
+        info_md = gr.Markdown("")
+
+        gr.Markdown("---\n### ✅ 最終候補")
+        final_audio = gr.Audio(
+            label="現在の最終候補（再生成しても保持されます）", type="filepath",
+            show_download_button=True, show_share_button=False, interactive=False,
+        )
+        finalize_button = gr.Button("✅ これで決定して保存", variant="primary")
+        final_status = gr.Textbox(label="", value="", interactive=False, lines=2, visible=False)
+
+        gen_outputs = cells + audios + buttons + [status, info_md]
+
+        def build_outputs(audio_list, msg, info):
+            n = len(audio_list)
+            cs, aus, bs = [], [], []
+            for j in range(POP):
+                if j < n:
+                    cs.append(gr.update(visible=True))
+                    aus.append(gr.update(value=audio_list[j]))
+                else:
+                    cs.append(gr.update(visible=False))
+                    aus.append(gr.update(value=None))
+                bs.append(gr.update(variant="secondary", value=f"★ 最終候補にする {j}"))
+            return cs + aus + bs + [msg, info]
+
+        def do_gen(prompt):
+            audio_list, info, msg = interface.generate_text_baseline(prompt)
+            return build_outputs(audio_list, msg, info)
+
+        gen_button.click(fn=do_gen, inputs=[prompt_box], outputs=gen_outputs)
+
+        # --- 最終候補の単一選択（再生成をまたいで path で保持）---
+        def make_pick(idx):
+            def _fn(prompt):
+                paths = interface.text_baseline_audio_paths
+                if idx >= len(paths):
+                    return [gr.update() for _ in range(POP)] + [gr.update(), gr.update()]
+                pick = {
+                    "prompt": (prompt or "").strip(),
+                    "round": interface._text_baseline_round,
+                    "index": idx,
+                    "path": paths[idx],
+                }
+                btns = []
+                for j in range(POP):
+                    if j == idx:
+                        btns.append(gr.update(variant="primary", value=f"✓ 最終候補 {j}"))
+                    else:
+                        btns.append(gr.update(variant="secondary", value=f"★ 最終候補にする {j}"))
+                return btns + [pick, gr.update(value=paths[idx])]
+            return _fn
+
+        for i, btn in enumerate(buttons):
+            btn.click(fn=make_pick(i), inputs=[prompt_box],
+                      outputs=buttons + [final_pick_state, final_audio])
+
+        def do_finalize(final_pick):
+            if not final_pick:
+                return gr.update(value="⚠️ 先に最終候補を1つ選んでください", visible=True)
+            interface.finalize_text_baseline(final_pick)
+            save_msg = interface.save_session()
+            return gr.update(
+                value=f"✅ 最終候補を確定し、セッションを保存しました\n{save_msg}",
+                visible=True,
+            )
+
+        finalize_button.click(fn=do_finalize, inputs=[final_pick_state], outputs=[final_status])
+
+    return demo
+
+
 def launch_demo_interface(
     model_name: str = "audioldm-m-full",
     population_size: int = 6,
     duration: float = 2.5,
     share: bool = False,
     server_port: int = 8080,
+    mode: str = "two_axis",
+    condition: str = None,
+    participant_id: str = None,
+    target_prompt_id: str = None,
+    order: str = None,
+    output_dir: str = "./output/iec_gradio",
 ):
-    """デモ専用インターフェースを起動する。"""
-    demo = create_demo_interface(
-        model_name=model_name,
-        population_size=population_size,
-        duration=duration,
-    )
+    """デモ専用インターフェースを起動する（mode によりUIを切り替える）。"""
+    if mode == "text_baseline":
+        demo = create_text_baseline_interface(
+            model_name=model_name,
+            population_size=population_size,
+            duration=duration,
+            condition=condition,
+            participant_id=participant_id,
+            target_prompt_id=target_prompt_id,
+            order=order,
+            output_dir=output_dir,
+        )
+    else:
+        demo = create_demo_interface(
+            model_name=model_name,
+            population_size=population_size,
+            duration=duration,
+            mode=mode,
+            condition=condition,
+            participant_id=participant_id,
+            target_prompt_id=target_prompt_id,
+            order=order,
+            output_dir=output_dir,
+        )
     demo.launch(share=share, server_port=server_port, server_name="0.0.0.0")
 
 

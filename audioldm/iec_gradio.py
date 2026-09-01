@@ -25,7 +25,11 @@ class IECInterface:
         model_name: str = "audioldm-s-full-v2",
         population_size: int = 6,
         duration: float = 5.0,
-        output_dir: str = "./output/iec_gradio"
+        output_dir: str = "./output/iec_gradio",
+        condition: Optional[str] = None,
+        participant_id: Optional[str] = None,
+        target_prompt_id: Optional[str] = None,
+        order: Optional[str] = None,
     ):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
@@ -37,12 +41,27 @@ class IECInterface:
             duration=duration,
             ga_mode="latent",
         )
-        
+
+        # ユーザスタディ用のセッションメタ情報
+        # condition: "A"(2軸交互探索) / "B"(単軸 CLAP-IEC) など。未指定なら通常利用。
+        self.session_meta = {
+            "condition": condition,
+            "participant_id": participant_id,
+            "target_prompt_id": target_prompt_id,
+            "order": order,
+        }
+
         # セッション状態
         self.current_results: List[Tuple] = []
         self.current_audio_paths: List[str] = []
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.session_dir = os.path.join(output_dir, f"session_{self.session_id}")
+        # ユーザスタディ実施時は output/iec_user_study/<participant>/<condition>/ に整理する
+        if participant_id:
+            self.session_dir = os.path.join(
+                output_dir, participant_id, condition or "NA", f"session_{self.session_id}"
+            )
+        else:
+            self.session_dir = os.path.join(output_dir, f"session_{self.session_id}")
         os.makedirs(self.session_dir, exist_ok=True)
 
         # スタイル転送用の状態
@@ -54,6 +73,11 @@ class IECInterface:
         self.baseline_results: List[Tuple] = []
         self.baseline_audio_paths: List[str] = []
         self._baseline_round: int = 0
+
+        # テキスト手打ちベースライン用の状態（ユーザスタディ 条件B）
+        self.text_baseline_results: List[Tuple] = []
+        self.text_baseline_audio_paths: List[str] = []
+        self._text_baseline_round: int = 0
 
         # x_T選択フェーズ用の状態
         self.seed_selection_results: List[Tuple] = []
@@ -330,6 +354,9 @@ class IECInterface:
         self,
         selected_checkboxes: List[int],
         n_candidates: int,
+        lock_region: bool = False,
+        regen_start: float = 0.5,
+        regen_end: float = 1.0,
         progress=gr.Progress(),
     ) -> Tuple[List, str, str]:
         """x_TガチャとCLAP-IECの行き来: 選択individualのCLAP embeddingを c* として
@@ -339,6 +366,10 @@ class IECInterface:
         継承される。ユーザはこの後、表示されたx_T候補から1つ選んで
         「✅ 選んだx_TでIECを開始」を押すことで、c* を保ったまま新しい音響テクスチャ
         でIECを再開できる。
+
+        lock_region=True の場合、c* に加えてその個体の音声のうち区間
+        [regen_start, regen_end] 以外を潜在空間で固定する。意味軸だけでなく音響的な
+        内容も部分的に引き継ぐため、往復してもテーマが崩れにくい。
 
         Returns:
             (音声リスト, ステータスメッセージ, x_T seed入力欄の値)
@@ -352,6 +383,9 @@ class IECInterface:
         if len(selected_checkboxes) != 1:
             return (self.seed_selection_audio_paths,
                     "⚠️ c*として継承する個体を1つだけ選択してください", "")
+        if lock_region and float(regen_start) >= float(regen_end):
+            return (self.seed_selection_audio_paths,
+                    "⚠️ 再生成区間は 開始% < 終了% にしてください", "")
 
         progress(0, desc="選択個体のCLAP embeddingでx_T候補を生成中...")
         index = selected_checkboxes[0]
@@ -359,6 +393,8 @@ class IECInterface:
         try:
             self.seed_selection_results = self.iec_system.start_gacha_from_individual(
                 index=index, n_candidates=int(n_candidates),
+                regen_start=float(regen_start) if lock_region else None,
+                regen_end=float(regen_end) if lock_region else None,
             )
             self._seed_selection_active = True
 
@@ -369,6 +405,7 @@ class IECInterface:
                 prefix="seed_selection",
             )
 
+            regen_meta = self.seed_selection_results[0][0].metadata
             self._gacha_round += 1
             self.interaction_log.append({
                 "timestamp": datetime.now().isoformat(),
@@ -377,11 +414,99 @@ class IECInterface:
                 "gacha_round": self._gacha_round,
                 "generation": self.iec_system.population.generation_number,
                 "x_T_seed": self.iec_system._x_T_seed,
+                "lock_region": bool(lock_region),
+                "regen_start": regen_meta.get("regen_start"),
+                "regen_end": regen_meta.get("regen_end"),
+                "regen_seconds": regen_meta.get("regen_seconds"),
+            })
+
+            progress(1.0, desc="完了!")
+            regen_note = ""
+            if regen_meta.get("regen_seconds"):
+                regen_note = (f"区間{regen_meta['regen_start']:.0%}〜"
+                              f"{regen_meta['regen_end']:.0%}を塗り直して")
+            message = (
+                f"🔄 ラウンド{self._gacha_round}: 個体{index}のCLAP embeddingを継承し"
+                f"{regen_note}x_T候補（{len(self.seed_selection_results)}個）を生成しました。"
+                "気に入った音を1つ選んでください。"
+            )
+            seed_str = str(self.iec_system._x_T_seed)
+            return self.seed_selection_audio_paths, message, seed_str
+
+        except Exception as e:
+            error_msg = f"エラーが発生しました: {str(e)}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            return self.seed_selection_audio_paths, error_msg, ""
+
+    def run_variation_gacha(
+        self,
+        candidate_index: int,
+        n_candidates: int,
+        regen_start: float = 0.5,
+        regen_end: float = 1.0,
+        progress=gr.Progress(),
+    ) -> Tuple[List, str, str]:
+        """バリエーションガチャ: 選んだx_T候補の区間 [regen_start, regen_end] だけを
+        塗り直して振り直す。
+
+        「この質感は良いが、もう少し違うバリエーションが欲しい」ときの入口。
+        候補群は固定領域を共有しつつ再生成区間が分岐するため、質感軸の中を局所的に
+        探索できる。中間区間を指定すれば両端が固定される（音質を左右するのは区間の
+        位置ではなく幅で、狭いほど元に近くなる）。
+        conditioning は元のラウンドと同一のまま。
+
+        Returns:
+            (音声リスト, ステータスメッセージ, x_T seed入力欄の値)
+        """
+        if not self.seed_selection_results:
+            return (self.seed_selection_audio_paths,
+                    "⚠️ 先に「x_Tを生成」を押してください", "")
+        if not (0 <= candidate_index < len(self.seed_selection_results)):
+            return (self.seed_selection_audio_paths,
+                    "⚠️ 塗り直したい候補を1つ選択してください", "")
+        if float(regen_start) >= float(regen_end):
+            return (self.seed_selection_audio_paths,
+                    "⚠️ 再生成区間は 開始% < 終了% にしてください", "")
+
+        progress(0, desc="区間を塗り直してx_T候補を生成中...")
+
+        try:
+            self.seed_selection_results = self.iec_system.start_variation_gacha_from_candidate(
+                index=candidate_index,
+                n_candidates=int(n_candidates),
+                regen_start=float(regen_start),
+                regen_end=float(regen_end),
+            )
+            self._seed_selection_active = True
+
+            progress(0.7, desc="音声を保存中...")
+            self.seed_selection_audio_paths = self.iec_system.save_generation_audio(
+                self.seed_selection_results,
+                output_dir=self.session_dir,
+                prefix="seed_selection",
+            )
+
+            regen_meta = self.seed_selection_results[0][0].metadata
+            self._gacha_round += 1
+            self.interaction_log.append({
+                "timestamp": datetime.now().isoformat(),
+                "action": "variation_gacha",
+                "anchor_index": candidate_index,
+                "gacha_round": self._gacha_round,
+                "generation": self.iec_system.population.generation_number,
+                "x_T_seed": self.iec_system._x_T_seed,
+                "regen_start": regen_meta.get("regen_start"),
+                "regen_end": regen_meta.get("regen_end"),
+                "regen_seconds": regen_meta.get("regen_seconds"),
             })
 
             progress(1.0, desc="完了!")
             message = (
-                f"🔄 ラウンド{self._gacha_round}: 個体{index}のCLAP embeddingを継承して"
+                f"🔁 ラウンド{self._gacha_round}: 候補{candidate_index}の区間"
+                f"{regen_meta['regen_start']:.0%}〜{regen_meta['regen_end']:.0%}"
+                f"（{regen_meta['regen_seconds']:.2f}秒）を塗り直して"
                 f"x_T候補（{len(self.seed_selection_results)}個）を生成しました。"
                 "気に入った音を1つ選んでください。"
             )
@@ -607,6 +732,107 @@ class IECInterface:
             traceback.print_exc()
             return self.baseline_audio_paths, "", error_msg, x_T_seed_str
 
+    def generate_text_baseline(
+        self,
+        prompt: str,
+        progress=gr.Progress()
+    ) -> Tuple[List, str, str]:
+        """テキスト手打ちベースライン（ユーザスタディ 条件B）の1回分を生成する。
+
+        入力プロンプトを全候補の意味(c)として共有し、各候補は独立なランダム x_T を
+        持つ（毎回新しい seed・テクスチャ制御不能）。進化・選択の次世代への反映は
+        行わない純粋な text-to-audio。ユーザは「生成→試聴→プロンプト書き換え→再生成」
+        を繰り返す。
+
+        `selection_seconds` は前回提示〜今回の生成操作までの経過（＝プロンプトを
+        考え・打ち込むのに要した時間の代理指標）として記録する。
+
+        Returns:
+            (音声リスト, 情報テキスト, ステータスメッセージ)
+        """
+        progress(0, desc="テキストから生成中...")
+        clicked_at = datetime.now()
+        # 提示〜次の生成までの経過（言語化に要した時間の代理）
+        selection_seconds = (
+            (clicked_at - self._presented_at).total_seconds()
+            if self._presented_at is not None else None
+        )
+
+        if not prompt or not prompt.strip():
+            return self.text_baseline_audio_paths, "", "⚠️ プロンプトを入力してください"
+
+        compute_started_at = datetime.now()
+        self._text_baseline_round += 1
+
+        try:
+            # 各生成を別「世代」として保存し、多様性分析が世代推移を追えるようにする
+            self.iec_system.population.generation_number = self._text_baseline_round
+            self.text_baseline_results = self.iec_system.generate_text_baseline_population(
+                prompt=prompt.strip(),
+            )
+
+            progress(0.7, desc="音声を保存中...")
+            self.text_baseline_audio_paths = self.iec_system.save_generation_audio(
+                self.text_baseline_results,
+                output_dir=self.session_dir,
+                prefix=f"text{self._text_baseline_round:03d}",
+            )
+
+            used_seeds = [g.metadata.get("x_T_seed") for g, _ in self.text_baseline_results]
+            presented_at = datetime.now()
+            compute_seconds = (presented_at - compute_started_at).total_seconds()
+            self.interaction_log.append({
+                "timestamp": presented_at.isoformat(),
+                "action": "text_baseline_generate",
+                "prompt": prompt.strip(),
+                "round": self._text_baseline_round,
+                "population_size": len(self.text_baseline_results),
+                "selection_seconds": selection_seconds,
+                "compute_seconds": compute_seconds,
+                "x_T_seeds": used_seeds,
+            })
+            # 次の生成までの経過計測の起点を更新
+            self._presented_at = presented_at
+
+            progress(1.0, desc="完了!")
+            audio_list = [path for path in self.text_baseline_audio_paths]
+            info = (
+                "### ⌨️ テキスト生成情報\n\n"
+                f"- **生成回数**: {self._text_baseline_round}\n"
+                f"- **候補数**: {len(self.text_baseline_results)}\n"
+                f"- **プロンプト**: {prompt.strip()}\n"
+                "- *進化機構なし。プロンプトを書き換えて再生成してください*"
+            )
+            message = f"⌨️ プロンプト『{prompt.strip()}』から {len(audio_list)} 個を生成しました（生成 {self._text_baseline_round} 回目）"
+            return audio_list, info, message
+
+        except Exception as e:
+            error_msg = f"エラーが発生しました: {str(e)}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            return self.text_baseline_audio_paths, "", error_msg
+
+    def finalize_text_baseline(self, final_pick: Optional[dict]) -> str:
+        """テキスト手打ちベースラインで最終的に選んだ音声を記録する。
+
+        提案手法の「最終個体の確定」に相当し、満足度評価・客観分析の対象となる
+        最終成果物を1つ確定する。生成には一切関与しない（純粋な記録）。
+        `final_pick` は選択時に保持した {prompt, round, index, path} の辞書で、
+        再生成をまたいで保持されるためパスを直接記録する。
+        """
+        if not final_pick:
+            return ""
+        self.interaction_log.append({
+            "timestamp": datetime.now().isoformat(),
+            "action": "text_baseline_final",
+            "prompt": final_pick.get("prompt"),
+            "round": final_pick.get("round"),
+            "final_index": final_pick.get("index"),
+            "final_audio_path": final_pick.get("path"),
+        })
+        return final_pick.get("path") or ""
+
     def rollback_generation(self, steps: int = 1) -> Tuple[List, str, str]:
         """
         指定世代数だけ戻る
@@ -685,11 +911,25 @@ class IECInterface:
             history_path = os.path.join(self.session_dir, "iec_history.json")
             self.iec_system.population.save_history(history_path)
             
+            # 各ログエントリに条件・被験者メタを付与（未設定キーのみ補完）
+            for entry in self.interaction_log:
+                for key, value in self.session_meta.items():
+                    if value is not None:
+                        entry.setdefault(key, value)
+
             # インタラクションログを保存
             log_path = os.path.join(self.session_dir, "interaction_log.json")
             with open(log_path, 'w', encoding='utf-8') as f:
                 json.dump(self.interaction_log, f, indent=2, ensure_ascii=False)
-            
+
+            # セッションメタ（条件・被験者・お題・提示順）を保存
+            meta_path = os.path.join(self.session_dir, "session_meta.json")
+            with open(meta_path, 'w', encoding='utf-8') as f:
+                json.dump(
+                    {"session_id": self.session_id, **self.session_meta},
+                    f, indent=2, ensure_ascii=False,
+                )
+
             message = f"✅ セッションを保存しました\n"
             message += f"📁 {self.session_dir}\n"
             message += f"- 履歴: {os.path.basename(history_path)}\n"

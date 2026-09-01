@@ -970,13 +970,66 @@ class AudioLDM_IEC:
 
         return info
 
+    def _make_inpaint_mask(
+        self, n: int, x0_ref: torch.Tensor, regen_start: float, regen_end: float
+    ) -> Tuple[torch.Tensor, torch.Tensor, int, int]:
+        """区間インペインティング用の (x0, mask, t_start, t_end) を構築する。
+
+        時間軸の区間 [regen_start, regen_end]（潜在フレーム長 T に対する比率）を
+        再生成し、それ以外を x0_ref で固定するマスクを返す。
+        本家 generate_sample_masked の time_mask_ratio_start_and_end と同じ規約で、
+        1つの区間指定だけで3パターンを表現できる:
+          - 先頭固定  : [0.5, 1.0]  → 後半を再生成（両端のうち左だけ固定）
+          - 中間塗り  : [0.3, 0.7]  → 中間を再生成（両端が固定される）
+          - 末尾固定  : [0.0, 0.5]  → 前半を再生成
+
+        mask==1 の領域が x0 から固定され、mask==0 の領域が自由に生成される
+        （ddim_sampling が毎ステップ img_orig*mask + (1-mask)*img でブレンドする）。
+        q_sample(x0, ts) は ts が (n,) なので x0 もバッチ n を必要とする。
+        """
+        C, _, F = self.latent_shape
+        T = self.latent_diffusion.latent_t_size
+        t_start = max(0, min(int(regen_start * T), T - 1))
+        # 最低1フレームは再生成する（区間が潰れるのを防ぐ）
+        t_end = max(t_start + 1, min(int(regen_end * T), T))
+
+        x0 = x0_ref.to(self.device).expand(n, -1, -1, -1).contiguous()
+        mask = torch.ones(n, 1, T, F, device=self.device)
+        mask[:, :, t_start:t_end, :] = 0.0   # この区間を再生成
+        return x0, mask, t_start, t_end
+
     def _generate_audio_batch_conditioning(
-        self, genotypes: List[ConditioningGenotype]
+        self,
+        genotypes: List[ConditioningGenotype],
+        inpaint_x0: Optional[torch.Tensor] = None,
+        regen_start: Optional[float] = None,
+        regen_end: Optional[float] = None,
     ) -> List[np.ndarray]:
-        """ConditioningGenotype のバッチを一括処理する（個体ごとの x_T を使用）。"""
+        """ConditioningGenotype のバッチを一括処理する（個体ごとの x_T を使用）。
+
+        inpaint_x0 が指定された場合は区間インペインティングを行う: 時間軸の区間
+        [regen_start, regen_end] だけを再生成し、それ以外を inpaint_x0 で固定する。
+        全個体が固定領域を共有しつつ再生成区間が分岐する「似てるけど少し違う」候補群になる。
+        音質を左右する主因は「どこを塗るか」ではなく「どれだけ塗るか」。再生成区間を
+        狭くするほど元に近くなる（対照実験では、再生成量を揃えると中間/端の優劣は無し）。
+
+        注意: 固定領域は知覚的にはほぼ一致するが、ビット単位では一致しない。
+        マスクブレンドは毎ステップ q_sample() で新しいノイズを引き、さらに
+        ブレンド後に最終ステップの UNet 更新が入るため。
+
+        生成された潜在は各個体の .z0 にキャッシュされ、後続のバリエーション
+        ガチャの参照 x0 として使われる。
+        """
         n = len(genotypes)
         cond_batch = torch.cat([g.embedding.to(self.device) for g in genotypes], dim=0)  # (N,1,512)
         x_T_batch = torch.cat([g.x_T.to(self.device) for g in genotypes], dim=0)  # (N,C,T,F)
+
+        x0 = mask = None
+        if inpaint_x0 is not None:
+            x0, mask, _, _ = self._make_inpaint_mask(
+                n, inpaint_x0,
+                regen_start if regen_start is not None else 0.5,
+                regen_end if regen_end is not None else 1.0)
 
         with self.latent_diffusion.ema_scope("Conditioning Batch"):
             with torch.no_grad():
@@ -990,11 +1043,16 @@ class AudioLDM_IEC:
                     unconditional_guidance_scale=self.guidance_scale,
                     unconditional_conditioning=uc,
                     x_T=x_T_batch,
+                    mask=mask,
+                    x0=x0,
                 )
                 if torch.max(torch.abs(samples)) > 1e2:
                     samples = torch.clip(samples, min=-10, max=10)
                 mel = self.latent_diffusion.decode_first_stage(samples)
                 wf_batch = self.latent_diffusion.mel_spectrogram_to_waveform(mel)
+
+        for i, g in enumerate(genotypes):
+            g.z0 = samples[i:i+1].detach()
         return [wf_batch[i:i+1] for i in range(n)]
 
     def initialize_population_seed_selection(
@@ -1004,6 +1062,10 @@ class AudioLDM_IEC:
         x_T_seed: Optional[int] = None,
         prompt_pool: Optional[List[str]] = None,
         base_embedding: Optional[torch.Tensor] = None,
+        inpaint_x0: Optional[torch.Tensor] = None,
+        regen_start: float = 0.5,
+        regen_end: float = 1.0,
+        base_prompt_label: Optional[str] = None,
     ) -> List[Tuple[ConditioningGenotype, np.ndarray]]:
         """x_T選択フェーズ: 音響テクスチャ (x_T) の選択。
 
@@ -1022,6 +1084,15 @@ class AudioLDM_IEC:
         収束した個体の embedding を c* として渡すことで、その意味的方向を保ったまま
         音響テクスチャ (x_T) だけを選び直すことができる。select_seed_winner() で
         この c* が次の conditioning 初期化に引き継がれる。
+
+        inpaint_x0 が指定された場合（バリエーションガチャ）、全候補で区間
+        [regen_start, regen_end] を再生成し、それ以外を inpaint_x0 で固定する。
+        候補は固定領域を共有しつつ再生成区間が分岐するため、気に入った質感の
+        周辺を局所的に探索できる。中間区間を指定すれば両端が固定される。
+
+        base_prompt_label は base_embedding 使用時のプロンプト表示名を明示指定する。
+        未指定だと "<c*:genN>" という自動ラベルになるため、同一ラウンドの継続である
+        バリエーションガチャで元の base_prompt を保つために使う。
         """
         print(f"[x_T選択] {n_candidates}個体の候補を生成中...")
 
@@ -1033,13 +1104,36 @@ class AudioLDM_IEC:
 
         if base_embedding is not None:
             c_base = base_embedding.clone().to(self.device)
-            effective_prompt = f"<c*:gen{self.population.generation_number}>"
+            effective_prompt = (
+                base_prompt_label
+                if base_prompt_label
+                else f"<c*:gen{self.population.generation_number}>"
+            )
             self._seed_selection_base_embedding = c_base.clone()
         else:
             pool = prompt_pool or PROMPT_POOL
             effective_prompt = prompt if prompt else str(np.random.choice(pool))
             c_base = self._encode_text_single(effective_prompt)
             self._seed_selection_base_embedding = None
+
+        regen_meta: Dict = {}
+        if inpaint_x0 is not None:
+            T = self.latent_diffusion.latent_t_size
+            t_start = max(0, min(int(regen_start * T), T - 1))
+            t_end = max(t_start + 1, min(int(regen_end * T), T))
+            regen_meta = {
+                "phase": "seed_selection_inpaint",
+                "regen_start": regen_start,
+                "regen_end": regen_end,
+                "regen_t_start": t_start,
+                "regen_t_end": t_end,
+                "regen_seconds": (t_end - t_start) / 25.6,
+            }
+            # t_start==0 は先頭を再生成＝末尾を固定、t_end>=T は末尾を再生成＝先頭を固定
+            kind = ("末尾固定" if t_start == 0 else
+                    "先頭固定" if t_end >= T else "中間塗り直し")
+            print(f"  [x_T選択] インペイント({kind}): フレーム[{t_start}:{t_end}]を再生成 "
+                  f"({(t_end - t_start) / 25.6:.2f}秒, {regen_start:.0%}〜{regen_end:.0%})")
 
         genotypes: List[ConditioningGenotype] = []
         for _ in range(n_candidates):
@@ -1056,6 +1150,7 @@ class AudioLDM_IEC:
                     "base_prompt": effective_prompt,
                     "prompt": effective_prompt,
                     "x_T_seed": self._x_T_seed,
+                    **regen_meta,
                 },
             )
             g.generation = -1
@@ -1063,7 +1158,9 @@ class AudioLDM_IEC:
 
         self._seed_selection_population = genotypes
 
-        waveforms = self._generate_audio_batch_conditioning(genotypes)
+        waveforms = self._generate_audio_batch_conditioning(
+            genotypes, inpaint_x0=inpaint_x0,
+            regen_start=regen_start, regen_end=regen_end)
         print(f"  [x_T選択] {len(genotypes)}個体の音声生成完了")
         return list(zip(genotypes, waveforms))
 
@@ -1120,6 +1217,8 @@ class AudioLDM_IEC:
         index: int,
         n_candidates: int = 8,
         x_T_seed: Optional[int] = None,
+        regen_start: Optional[float] = None,
+        regen_end: Optional[float] = None,
     ) -> List[Tuple[ConditioningGenotype, np.ndarray]]:
         """x_TガチャとCLAP-IECの行き来: 現世代の個体のCLAP embeddingを c* として、
         新たな x_T選択フェーズ（initialize_population_seed_selection）を開始する。
@@ -1128,19 +1227,82 @@ class AudioLDM_IEC:
         選び直すための入口。ユーザーが select_seed_winner() で新たな x_T を選ぶと、
         その c* が次のIEC初期個体群の c_base として継承される。
 
+        regen_start/regen_end を指定すると、その個体の音声のうち区間
+        [regen_start, regen_end] だけを再生成し、それ以外を潜在空間で固定したまま
+        x_T を振り直す（c* に加えて音響的な内容も部分的に引き継ぐ）。個体の z0 が
+        キャッシュされていない場合（ロールバック後など）は通常のガチャにフォールバック。
+
         Args:
             index: self.population.current_generation 内の個体インデックス（c* の元）
             n_candidates: 生成する x_T 候補数
             x_T_seed: 候補群のノイズ生成に使う seed（None でランダム）
+            regen_start/regen_end: 再生成する区間（両方 None でインペイントしない）
         """
         if not (0 <= index < len(self.population.current_generation)):
             raise ValueError(f"無効な個体インデックス: {index}")
 
-        c_star = self.population.current_generation[index].embedding.clone()
+        individual = self.population.current_generation[index]
+        c_star = individual.embedding.clone()
+
+        inpaint_x0 = None
+        if regen_start is not None or regen_end is not None:
+            inpaint_x0 = individual.z0
+            if inpaint_x0 is None:
+                # 被験者セッション中に落とさない。固定なしで続行する。
+                print(f"  [警告] 個体{index}の z0 が未キャッシュのためインペイントをスキップします")
+
         return self.initialize_population_seed_selection(
             n_candidates=n_candidates,
             x_T_seed=x_T_seed,
             base_embedding=c_star,
+            inpaint_x0=inpaint_x0,
+            regen_start=regen_start if regen_start is not None else 0.5,
+            regen_end=regen_end if regen_end is not None else 1.0,
+        )
+
+    def start_variation_gacha_from_candidate(
+        self,
+        index: int,
+        n_candidates: int = 8,
+        regen_start: float = 0.5,
+        regen_end: float = 1.0,
+        x_T_seed: Optional[int] = None,
+    ) -> List[Tuple[ConditioningGenotype, np.ndarray]]:
+        """バリエーションガチャ: ガチャ候補の一部区間だけを塗り直して x_T を振り直す。
+
+        気に入った候補のうち区間 [regen_start, regen_end] だけを再生成し、それ以外を
+        潜在空間で固定することで「似てるけどちょっと違う」候補群を得る。conditioning は
+        元のラウンドと同一（全候補が同じ c_base を持つため anchor.embedding がそのまま
+        c_base）なので、質感軸の中での局所探索になる。
+
+        中間区間（0<start<end<1）は両端が固定される。先頭固定は [X, 1.0]、
+        末尾固定は [0, X]。なお再生成量を揃えた対照実験では中間/端で音質の優劣は
+        確認できず、効くのは区間の位置ではなく「どれだけ塗り直すか」だった。
+
+        Args:
+            index: self._seed_selection_population 内の候補インデックス（固定元）
+            n_candidates: 生成する x_T 候補数
+            regen_start/regen_end: 再生成する区間（Tに対する比率、start<end）。
+                再生成区間を狭く（＝固定を多く）すると「似てる」感が強まる。
+            x_T_seed: 候補群のノイズ生成に使う seed（None でランダム）
+        """
+        if not self._seed_selection_population:
+            raise ValueError("先にx_T選択を実行してください")
+        if not (0 <= index < len(self._seed_selection_population)):
+            raise ValueError(f"無効なx_T選択インデックス: {index}")
+
+        anchor = self._seed_selection_population[index]
+        if anchor.z0 is None:
+            raise ValueError(f"候補{index}の潜在表現が未キャッシュです。先にx_T選択を実行してください")
+
+        return self.initialize_population_seed_selection(
+            n_candidates=n_candidates,
+            x_T_seed=x_T_seed,
+            base_embedding=anchor.embedding,
+            base_prompt_label=anchor.metadata.get("base_prompt"),
+            inpaint_x0=anchor.z0,
+            regen_start=regen_start,
+            regen_end=regen_end,
         )
 
     def initialize_population_conditioning(
@@ -1595,6 +1757,50 @@ class AudioLDM_IEC:
                 },
             )
             g.generation = 0
+            genotypes.append(g)
+
+        waveforms = self._generate_audio_batch_conditioning(genotypes)
+        return list(zip(genotypes, waveforms))
+
+    def generate_text_baseline_population(
+        self,
+        prompt: str,
+    ) -> List[Tuple[ConditioningGenotype, np.ndarray]]:
+        """テキスト手打ちベースライン用の生成（ユーザスタディ条件B相当）。
+
+        入力プロンプト1つを全個体の条件ベクトル c として共有し（意味は手打ちテキストが決める）、
+        各個体は独立なランダム x_T を持つ（毎回新しい seed、テクスチャは制御不能に変わる）。
+        進化・選択履歴・プールサンプリングは一切行わない純粋な text-to-audio であり、
+        n_candidate による best-of 選別も行わない raw な1発生成（提案手法の各個体と同じ扱い）。
+
+        全個体が同一プロンプトの c を共有し x_T のみ異なるため、「1プロンプトで
+        population_size 個の候補（テクスチャ違い）を提示」する標準的な text-to-x の
+        バッチ生成に相当する。
+        """
+        if not prompt or not prompt.strip():
+            raise ValueError("テキストベースラインにはプロンプトが必要です")
+
+        c = self._encode_text_single(prompt.strip())  # (1, 1, 512)
+
+        genotypes: List[ConditioningGenotype] = []
+        for _ in range(self.population_size):
+            seed = int(np.random.randint(0, 2**32 - 1))
+            gen = torch.Generator(device=self.device).manual_seed(seed)
+            x_T = torch.randn((1,) + self.latent_shape, device=self.device, generator=gen)
+            g = ConditioningGenotype(
+                embedding=c.clone(),
+                x_T=x_T,
+                source_prompt=prompt.strip(),
+                seed=seed,
+                metadata={
+                    "ga_mode": "text_baseline",
+                    "initialization": "text_baseline",
+                    "operation": "text_prompt_generation",
+                    "prompt": prompt.strip(),
+                    "x_T_seed": seed,
+                },
+            )
+            g.generation = self.population.generation_number
             genotypes.append(g)
 
         waveforms = self._generate_audio_batch_conditioning(genotypes)

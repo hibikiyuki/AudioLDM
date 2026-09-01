@@ -50,9 +50,9 @@ ax.add_patch(FancyBboxPatch((0.15, 0.3), 4.6, 4.0,
 ax.add_patch(FancyBboxPatch((5.25, 0.3), 4.6, 4.0,
              boxstyle="round,pad=0.05", linewidth=1.0, edgecolor="black",
              facecolor="0.90", linestyle="-"))
-ax.text(2.45, 4.05, "音響テクスチャ選択", ha="center",
+ax.text(2.45, 4.05, "第1段階：音響テクスチャ選択", ha="center",
         fontsize=14, fontweight="bold")
-ax.text(7.55, 4.05, "意味空間進化", ha="center",
+ax.text(7.55, 4.05, "第2段階：意味空間進化", ha="center",
         fontsize=14, fontweight="bold")
 
 # ---- Phase 1 blocks ----

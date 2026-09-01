@@ -265,6 +265,47 @@ CLAP_SCORES: Dict[str, float] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# デモUI用のプロンプト例（Gradio のプルダウン）
+# ---------------------------------------------------------------------------
+# (表示ラベル, 実際に投入する英語プロンプト) の並び。オープンキャンパス等で
+# 英語のプロンプトを思いつけない来場者が、選ぶだけで開始できるようにするためのもの。
+# 選定基準:
+#   - PROMPT_POOL 由来のものは CLAP_SCORES が概ね 0.35 以上（AudioLDMが確実に
+#     描き分けられるプロンプト）を優先した。
+#   - プール外の項目は、デモの導入として分かりやすい言い回しを手で追加している。
+#   - 効果音・環境音は個体差が聴き取りやすく初見のウケが良いので末尾に少数入れる。
+#   - ⚠️ CLAP_SCORES が高くても聴感上の品質が伴うとは限らない。ピアノ系
+#     (solo piano melody: 0.388 等) とトランペット系は試聴の結果、音色が破綻しがち
+#     だったため、スコアに関わらず除外している。追加時は必ず耳で確認すること。
+DEMO_PROMPT_EXAMPLES = [
+    ("🎵 Lo-fiヒップホップ", "lofi hip hop"),
+    ("🎵 壮大なオーケストラの打楽器", "epic orchestral drums"),
+    ("🎵 あたたかく優しいアコースティックギター", "acoustic guitar, warm and gentle"),
+    ("🎵 夢見るようなアンビエントシンセ", "ambient synthesizer pad, dreamy"),
+    ("🎻 感情的なバイオリンとオーケストラ", "emotional violin solo with orchestra"),
+    ("🪕 明るく陽気なウクレレ", "bright and cheerful ukulele melody"),
+    ("🪕 バンジョーのフォークメロディ", "banjo folk melody"),
+    ("🎶 オルゴールの子守唄", "gentle lullaby with music box melody"),
+    ("🎼 繊細なハープと弦楽", "delicate harp arpeggio with strings"),
+    ("🎧 重低音のトリップホップ", "dark trip hop beat with heavy bass"),
+    ("🥁 重低音のテクノ", "pulsating techno synthesizer with kick drum"),
+    ("🔊 ヘヴィなビートのエレクトロ", "aggressive electronic beat with heavy bass"),
+    ("🌴 レゲエのリズム", "reggae rhythm"),
+    ("🎻 バロック音楽", "baroque music"),
+    ("🎬 合唱付きの壮大な映画音楽", "epic cinematic orchestra with choir"),
+    ("😱 緊迫したサスペンス音楽", "tense thriller music with staccato strings"),
+    ("👻 不気味なテルミン", "eerie theremin melody with strings"),
+    ("🌊 打ち寄せる波", "ocean waves crashing"),
+    ("🔥 パチパチと燃える焚き火", "crackling fire"),
+    ("🌲 森の環境音", "forest nature ambience"),
+    ("🚀 宇宙空間のアンビエント", "outer space ambient sounds"),
+]
+
+# プルダウンの初期値（= テキストボックスの初期値と一致させる）
+DEFAULT_DEMO_PROMPT = "lofi hip hop"
+
+
 def sample_prompts(
     n: int,
     exclude: Optional[List[str]] = None,

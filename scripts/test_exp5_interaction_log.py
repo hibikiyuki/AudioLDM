@@ -49,6 +49,11 @@ class FakePopulation:
         self.generation_number = max(0, self.generation_number - steps)
         return [FakeGenotype({"prompt": "fake prompt"}) for _ in range(POP_SIZE)]
 
+    def save_history(self, path: str):
+        import json
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump([], f)
+
 
 class FakeIECSystem:
     """AudioLDM_IEC のロード不要なスタブ。ログの計測対象になる時間だけ再現する。"""
@@ -57,9 +62,14 @@ class FakeIECSystem:
         self.population = FakePopulation()
         self.population_size = population_size
         self.ga_mode = "conditioning"
+        # conditioning 初期化後に実際の x_T seed を保持する（UI入力欄への反映に使われる）
+        self._x_T_seed: Optional[int] = None
 
     def initialize_population_conditioning(self, prompt, slerp_alpha, x_T_seed=None, x_T_mode="elite_keep", **kwargs):
         time.sleep(COMPUTE_DELAY)
+        if x_T_seed is None:
+            x_T_seed = int(np.random.randint(0, 2**32 - 1))
+        self._x_T_seed = x_T_seed
         return [
             (FakeGenotype({"prompt": prompt, "initialization": "slerp_b2"}), np.zeros(10))
             for _ in range(self.population_size)
@@ -88,6 +98,14 @@ class FakeIECSystem:
             x_T_seed = int(np.random.randint(0, 2**32 - 1))
         return [
             (FakeGenotype({"initialization": "random_baseline", "x_T_seed": x_T_seed}), np.zeros(10))
+            for _ in range(self.population_size)
+        ]
+
+    def generate_text_baseline_population(self, prompt):
+        time.sleep(COMPUTE_DELAY)
+        return [
+            (FakeGenotype({"initialization": "text_baseline", "prompt": prompt,
+                           "x_T_seed": int(np.random.randint(0, 2**32 - 1))}), np.zeros(10))
             for _ in range(self.population_size)
         ]
 
@@ -121,8 +139,22 @@ def make_interface(tmp_dir: str) -> IECInterface:
     interface.baseline_results = []
     interface.baseline_audio_paths = []
     interface._baseline_round = 0
+    interface.text_baseline_results = []
+    interface.text_baseline_audio_paths = []
+    interface._text_baseline_round = 0
+    interface.seed_selection_results = []
+    interface.seed_selection_audio_paths = []
+    interface._seed_selection_active = False
+    interface._gacha_round = 1
     interface.interaction_log = []
     interface._presented_at = None
+    # ユーザスタディ条件メタ（デフォルトは未設定）。テスト[7]で上書きする。
+    interface.session_meta = {
+        "condition": None,
+        "participant_id": None,
+        "target_prompt_id": None,
+        "order": None,
+    }
     return interface
 
 
@@ -144,7 +176,7 @@ def run() -> bool:
 
         # --- 1. initialize_generation ---------------------------------
         print("\n[1] initialize_generation")
-        audio_list, info, message = interface.initialize_generation(
+        audio_list, info, message, seed_str0 = interface.initialize_generation(
             prompt="tense orchestral strings",
             variation_strength=0.3,
             ga_mode="conditioning",
@@ -258,6 +290,40 @@ def run() -> bool:
             f"seed_str={seed_str}, log5.x_T_seed={log5.get('x_T_seed')}",
         )
 
+        # --- 8. text_baseline（テキスト手打ちベースライン）---------------
+        print("\n[8] generate_text_baseline / finalize_text_baseline")
+        audio_t1, info_t1, msg_t1 = interface.generate_text_baseline(
+            prompt="warm mellow piano", progress=NOOP_PROGRESS)
+        logt1 = interface.interaction_log[-1]
+        all_ok &= check("action == 'text_baseline_generate'",
+                        logt1.get("action") == "text_baseline_generate")
+        all_ok &= check("compute_seconds が記録されている", "compute_seconds" in logt1)
+        all_ok &= check("x_T_seeds が候補数分のリスト",
+                        isinstance(logt1.get("x_T_seeds"), list) and len(logt1["x_T_seeds"]) == POP_SIZE)
+        all_ok &= check("round == 1", logt1.get("round") == 1)
+        all_ok &= check("候補数が population_size と一致", len(audio_t1) == POP_SIZE)
+
+        time.sleep(VIEW_DELAY)
+        audio_t2, info_t2, msg_t2 = interface.generate_text_baseline(
+            prompt="warm mellow piano in a small room", progress=NOOP_PROGRESS)
+        logt2 = interface.interaction_log[-1]
+        all_ok &= check(
+            "2回目の selection_seconds が「提示〜再生成」の経過を反映",
+            logt2.get("selection_seconds") is not None
+            and logt2["selection_seconds"] >= VIEW_DELAY - TIME_TOLERANCE,
+            f"selection_seconds={logt2.get('selection_seconds')}",
+        )
+        all_ok &= check("round == 2", logt2.get("round") == 2)
+
+        pick = {"prompt": "warm mellow piano in a small room", "round": 2,
+                "index": 1, "path": interface.text_baseline_audio_paths[1]}
+        final_path = interface.finalize_text_baseline(pick)
+        logf = interface.interaction_log[-1]
+        all_ok &= check("action == 'text_baseline_final'", logf.get("action") == "text_baseline_final")
+        all_ok &= check("final_audio_path が選択パスと一致", logf.get("final_audio_path") == pick["path"])
+        all_ok &= check("finalize の返り値が選択パスと一致", final_path == pick["path"])
+        all_ok &= check("空選択の finalize は空文字を返す", interface.finalize_text_baseline(None) == "")
+
         # --- 6. save_session で JSON シリアライズ可能か ------------------
         print("\n[6] interaction_log の JSON シリアライズ確認")
         import json
@@ -266,6 +332,40 @@ def run() -> bool:
             all_ok &= check("interaction_log が JSON シリアライズ可能", True)
         except TypeError as e:
             all_ok &= check("interaction_log が JSON シリアライズ可能", False, str(e))
+
+        # --- 7. ユーザスタディ条件タグの記録 ----------------------------
+        print("\n[7] save_session による条件タグ付与")
+        interface.session_meta = {
+            "condition": "B",
+            "participant_id": "P01",
+            "target_prompt_id": "t1",
+            "order": "AB",
+        }
+        save_msg = interface.save_session()
+        all_ok &= check("save_session が成功メッセージを返す", "保存しました" in save_msg, save_msg)
+
+        log_path = os.path.join(interface.session_dir, "interaction_log.json")
+        meta_path = os.path.join(interface.session_dir, "session_meta.json")
+        all_ok &= check("interaction_log.json が出力されている", os.path.exists(log_path))
+        all_ok &= check("session_meta.json が出力されている", os.path.exists(meta_path))
+
+        with open(log_path, encoding="utf-8") as f:
+            saved_log = json.load(f)
+        all_ok &= check(
+            "全ログエントリに condition が付与されている",
+            all(e.get("condition") == "B" for e in saved_log),
+        )
+        all_ok &= check(
+            "全ログエントリに participant_id が付与されている",
+            all(e.get("participant_id") == "P01" for e in saved_log),
+        )
+        with open(meta_path, encoding="utf-8") as f:
+            saved_meta = json.load(f)
+        all_ok &= check(
+            "session_meta.json に condition/order が記録されている",
+            saved_meta.get("condition") == "B" and saved_meta.get("order") == "AB",
+            f"meta={saved_meta}",
+        )
 
     print("\n" + "=" * 60)
     print(f"総合判定: {'PASS' if all_ok else 'FAIL'}")

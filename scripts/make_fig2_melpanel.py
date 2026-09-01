@@ -51,30 +51,39 @@ def main():
     args = ap.parse_args()
 
     wavs = args.wavs or [f"tmp/individual_{i}.wav" for i in range(4)]
-    assert len(wavs) == 4, "exactly 4 wav files are required"
+    assert len(wavs) in (2, 4), "2 wav files (①②) or 4 wav files (①〜④)"
 
     cmap = "gray_r" if args.gray else "magma"
-    fig, axes = plt.subplots(2, 2, figsize=(7.4, 5.8),
-                              gridspec_kw={"hspace": 0.55, "wspace": 0.22})
+    if len(wavs) == 2:
+        # 2段組の1カラム幅に収める用。①②のみで「時間構造を保ったまま意味が変わる」を示す
+        labels = [LABELS[0], LABELS[1]]
+        fig, axes = plt.subplots(1, 2, figsize=(7.4, 2.9),
+                                 gridspec_kw={"wspace": 0.28})
+        title_fs, cb_fs, cb_rect = 14, 10, [0.94, 0.16, 0.016, 0.66]
+    else:
+        labels = LABELS
+        fig, axes = plt.subplots(2, 2, figsize=(7.4, 5.8),
+                                 gridspec_kw={"hspace": 0.55, "wspace": 0.22})
+        title_fs, cb_fs, cb_rect = 21, 15, [0.94, 0.12, 0.018, 0.76]
 
     img = None
-    for ax, wav, label in zip(axes.ravel(), wavs, LABELS):
+    for ax, wav, label in zip(np.ravel(axes), wavs, labels):
         y, sr = librosa.load(wav, sr=args.sr)
         S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=args.n_mels)
         S_db = librosa.power_to_db(S, ref=np.max)
         img = librosa.display.specshow(
             S_db, sr=sr, x_axis="time", y_axis="mel",
             cmap=cmap, vmin=-80, vmax=0, ax=ax)
-        ax.set_title(label, fontsize=21, pad=6)
+        ax.set_title(label, fontsize=title_fs, pad=6)
         ax.set_xlabel("時間 [s]", fontsize=8)
         ax.set_ylabel("周波数 (mel)", fontsize=8)
         ax.tick_params(labelsize=9)
 
     fig.tight_layout(rect=(0, 0, 0.92, 1), pad=0.6)
-    cax = fig.add_axes([0.94, 0.12, 0.018, 0.76])
+    cax = fig.add_axes(cb_rect)
     cb = fig.colorbar(img, cax=cax, format="%+d")
-    cb.set_label("音圧 [dB]", fontsize=15)
-    cb.ax.tick_params(labelsize=9)
+    cb.set_label("音圧 [dB]", fontsize=cb_fs)
+    cb.ax.tick_params(labelsize=8 if len(wavs) == 2 else 9)
     fig.savefig(args.out, dpi=300, bbox_inches="tight")
     print(f"saved: {args.out}")
 

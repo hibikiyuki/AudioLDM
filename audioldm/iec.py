@@ -765,6 +765,7 @@ class ConditioningGenotype:
 
     embedding: CLAP text embedding  shape: (1, 1, 512)
     x_T:       固定初期ノイズ        shape: (1, C, T, F) — 全個体で同じ参照を保持
+    z0:        生成後の潜在表現      shape: (1, C, T, F) — 生成時にキャッシュされる
     """
 
     def __init__(
@@ -777,6 +778,9 @@ class ConditioningGenotype:
     ):
         self.embedding = embedding.clone()
         self.x_T = x_T          # 全個体で共有する参照（clone しない）
+        # DDIM 生成の出力潜在。_generate_audio_batch_conditioning が生成後に埋める。
+        # 先頭固定インペインティング（バリエーションガチャ）の参照 x0 として使う。
+        self.z0: Optional[torch.Tensor] = None
         self.source_prompt = source_prompt
         self.seed = seed
         self.metadata = metadata or {}
@@ -788,6 +792,9 @@ class ConditioningGenotype:
         return f"cond_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
 
     def clone(self) -> 'ConditioningGenotype':
+        # z0 は引き継がない（None のまま）。クローンは embedding を変異させる前段であり、
+        # 親の z0 は子の embedding に対応しない stale な値になるため。
+        # z0 が遺伝子そのものである LatentZ0Genotype.clone() とは意図的に逆。
         cloned = ConditioningGenotype(
             embedding=self.embedding.clone(),
             x_T=self.x_T,           # 共有参照をそのまま引き継ぐ

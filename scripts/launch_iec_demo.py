@@ -39,6 +39,22 @@ def main():
                         help="サーバーポート番号 (デフォルト: 8080)")
     parser.add_argument("--share", action="store_true",
                         help="Gradioの公開リンクを生成する")
+    parser.add_argument("--mode", type=str, default="two_axis",
+                        choices=["two_axis", "single_axis", "text_baseline"],
+                        help="two_axis: 2軸交互探索(提案/方法1) / "
+                             "single_axis: 単軸CLAP-IEC(温存・非使用) / "
+                             "text_baseline: テキスト手打ちベースライン(対照/方法2) "
+                             "(デフォルト: two_axis)")
+    parser.add_argument("--condition", type=str, default=None,
+                        help="ユーザスタディの条件ラベル (例: A / B)")
+    parser.add_argument("--participant_id", type=str, default=None,
+                        help="被験者ID。指定時は output/<participant>/<condition>/ に保存")
+    parser.add_argument("--target_prompt_id", type=str, default=None,
+                        help="お題(ターゲットプロンプト)の識別子")
+    parser.add_argument("--order", type=str, default=None,
+                        help="提示順 (例: AB / BA)")
+    parser.add_argument("--output_dir", type=str, default="./output/iec_gradio",
+                        help="セッション保存先のルート (ユーザスタディ時は ./output/iec_user_study 推奨)")
     args = parser.parse_args()
 
     print("=" * 70)
@@ -48,6 +64,9 @@ def main():
     print(f"個体数: {args.population_size}")
     print(f"音声長: {args.duration}秒")
     print(f"ポート: {args.port}")
+    print(f"モード: {args.mode}")
+    if args.participant_id:
+        print(f"被験者: {args.participant_id} / 条件: {args.condition} / 提示順: {args.order}")
     print(f"公開リンク: {'有効' if args.share else '無効'}")
     print("=" * 70)
     print()
@@ -59,6 +78,12 @@ def main():
             duration=args.duration,
             share=args.share,
             server_port=args.port,
+            mode=args.mode,
+            condition=args.condition,
+            participant_id=args.participant_id,
+            target_prompt_id=args.target_prompt_id,
+            order=args.order,
+            output_dir=args.output_dir,
         )
     except KeyboardInterrupt:
         print("\n\nサーバーを停止しました。")
