@@ -207,6 +207,9 @@ def create_demo_interface(
     target_prompt_id: str = None,
     order: str = None,
     output_dir: str = "./output/iec_gradio",
+    injection_band=None,
+    prompt_pool=None,
+    translate_backend="auto",
 ) -> gr.Blocks:
     """CLAP-IEC デモ専用インターフェースを構築する。
 
@@ -226,6 +229,9 @@ def create_demo_interface(
         participant_id=participant_id,
         target_prompt_id=target_prompt_id,
         order=order,
+        injection_band=injection_band,
+        prompt_pool=prompt_pool,
+        translate_backend=translate_backend,
     )
     # デモは常に conditioning モードで動作する
     interface.iec_system.ga_mode = "conditioning"
@@ -254,9 +260,20 @@ def create_demo_interface(
             # 左パネル: x_Tガチャ（音の質感）— 単軸条件(方法2)では非表示
             # ============================================================
             with gr.Column(scale=1, visible=not is_single):
-                gr.Markdown("### 🎯 x_Tガチャ — 音の質感を選ぶ", elem_classes=["panel-head"])
+                gr.Markdown("### 🎯 初期化 / x_Tガチャ", elem_classes=["panel-head"])
 
-                with gr.Row():
+                # 開始方法。「おまかせ」は初期化フェーズ（候補ごとに異なる c をプールから引く）。
+                # プロンプト入力を一度も要求せずに出発点を選べる。
+                start_mode_radio = gr.Radio(
+                    choices=[
+                        ("おまかせ（プロンプト入力なし）", "free"),
+                        ("プロンプトから", "prompt"),
+                    ],
+                    value="free",
+                    label="開始方法",
+                )
+
+                with gr.Row(visible=False) as prompt_row:
                     prompt_box = gr.Textbox(
                         label="プロンプト", value=DEFAULT_DEMO_PROMPT,
                         placeholder="例: acoustic guitar, warm and gentle",
@@ -274,11 +291,13 @@ def create_demo_interface(
                         label="x_T seed (空欄でランダム)", value="", placeholder="例: 42",
                         scale=2,
                     )
+                    # 候補数 N は第2階段（IEC個体数 POP）とは独立。初期化・ガチャは
+                    # 1回だけの操作なので、毎世代の負担が乗る第2段階とは設計要件が違う。
                     n_slider = gr.Slider(
-                        minimum=4, maximum=MAX_CANDIDATES, value=6, step=1,
-                        label="候補数 N", scale=1,
+                        minimum=2, maximum=MAX_CANDIDATES, value=POP, step=1,
+                        label=f"候補数 N（IEC個体数 {POP} とは独立）", scale=1,
                     )
-                    gacha_button = gr.Button("🎯 x_Tを生成", variant="primary", scale=1)
+                    gacha_button = gr.Button("🎲 候補を生成", variant="primary", scale=1)
                 # 再生成する区間 [開始%, 終了%]。区間外は固定される。
                 #   50-100=後半 / 30-70=中間(両端固定) / 0-50=前半
                 # 見た目はつまみ2つの自作スライダー、値は下の隠し Number が保持する。
@@ -309,10 +328,10 @@ def create_demo_interface(
                         cand_buttons.append(btn)
 
                 start_iec_button = gr.Button(
-                    "✅ 選んだx_TでIECを開始 →", variant="primary", size="lg")
+                    "✅ 選んだ候補でIECを開始 →", variant="primary", size="lg")
                 gacha_status = gr.Textbox(
-                    label="ガチャ状況", value="プロンプトを決めて「x_Tを生成」を押してください",
-                    interactive=False, lines=2,
+                    label="状況", value="「候補を生成」を押してください（プロンプト入力は不要）",
+                    interactive=False, lines=3,
                 )
 
             # ============================================================
@@ -460,9 +479,16 @@ def create_demo_interface(
         # ================================================================
         # アクション
         # ================================================================
-        def do_generate_gacha(prompt, n, seed_str):
-            audio_list, msg, new_seed = interface.run_seed_selection(prompt, int(n), seed_str)
+        def do_generate_gacha(prompt, n, seed_str, start_mode):
+            # "free" = 初期化フェーズ（候補ごとに異なる c をプールから引く）
+            per_candidate_c = (start_mode == "free")
+            audio_list, msg, new_seed = interface.run_seed_selection(
+                prompt, int(n), seed_str, per_candidate_c=per_candidate_c)
             return build_gacha_outputs(audio_list, msg, new_seed)
+
+        def toggle_start_mode(start_mode):
+            """「プロンプトから」を選んだときだけプロンプト入力欄を出す。"""
+            return gr.update(visible=(start_mode == "prompt"))
 
         def do_variation_gacha(cand_sel, n, regen_start_pct, regen_end_pct):
             # インペイントには参照となる既存の候補が必要なので、必ず1つ選ばせる
@@ -579,9 +605,14 @@ def create_demo_interface(
             outputs=[single_prompt_box])
 
         # --- メインアクションの結線 ---
+        start_mode_radio.change(
+            fn=toggle_start_mode,
+            inputs=[start_mode_radio],
+            outputs=[prompt_row],
+        )
         gacha_button.click(
             fn=do_generate_gacha,
-            inputs=[prompt_box, n_slider, seed_box],
+            inputs=[prompt_box, n_slider, seed_box, start_mode_radio],
             outputs=gacha_outputs,
         )
         variation_button.click(
@@ -629,6 +660,9 @@ def create_text_baseline_interface(
     target_prompt_id: str = None,
     order: str = None,
     output_dir: str = "./output/iec_gradio",
+    injection_band=None,
+    prompt_pool=None,
+    translate_backend="auto",
 ) -> gr.Blocks:
     """テキスト手打ちベースライン専用インターフェース（ユーザスタディ 条件B）。
 
@@ -646,6 +680,9 @@ def create_text_baseline_interface(
         participant_id=participant_id,
         target_prompt_id=target_prompt_id,
         order=order,
+        injection_band=injection_band,
+        prompt_pool=prompt_pool,
+        translate_backend=translate_backend,
     )
     interface.iec_system.ga_mode = "conditioning"
     POP = population_size
@@ -661,8 +698,8 @@ def create_text_baseline_interface(
 
         with gr.Row():
             prompt_box = gr.Textbox(
-                label="プロンプト", value="lofi hip hop",
-                placeholder="欲しい音を言葉で表現してください（例: warm mellow piano in a small room）",
+                label="プロンプト（日本語で入力できます）", value="",
+                placeholder="欲しい音を言葉で表現してください（例: 暖かくてやわらかいピアノ／warm mellow piano）",
                 scale=4,
             )
             gen_button = gr.Button("🎲 生成", variant="primary", scale=1)
@@ -770,9 +807,13 @@ def launch_demo_interface(
     target_prompt_id: str = None,
     order: str = None,
     output_dir: str = "./output/iec_gradio",
+    injection_band=None,
+    prompt_pool=None,
+    translate_backend="auto",
 ):
     """デモ専用インターフェースを起動する（mode によりUIを切り替える）。"""
     if mode == "text_baseline":
+        # 手打ちベースラインは意味方向プールを使わないため injection_band は渡さない
         demo = create_text_baseline_interface(
             model_name=model_name,
             population_size=population_size,
@@ -782,6 +823,7 @@ def launch_demo_interface(
             target_prompt_id=target_prompt_id,
             order=order,
             output_dir=output_dir,
+            translate_backend=translate_backend,
         )
     else:
         demo = create_demo_interface(
@@ -794,6 +836,9 @@ def launch_demo_interface(
             target_prompt_id=target_prompt_id,
             order=order,
             output_dir=output_dir,
+            injection_band=injection_band,
+            prompt_pool=prompt_pool,
+            translate_backend=translate_backend,
         )
     demo.launch(share=share, server_port=server_port, server_name="0.0.0.0")
 

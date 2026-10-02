@@ -1,0 +1,137 @@
+{
+  "config": {
+    "pop_size": 6,
+    "n_generations": 8,
+    "select_k": 2,
+    "n_trials": 10,
+    "targets": [
+      "tense orchestral strings with brass fanfare",
+      "energetic electronic dance music with heavy bass",
+      "gentle acoustic guitar ballad"
+    ],
+    "base_prompt": "music",
+    "pool_size": 30,
+    "pool_seed": 20260822,
+    "p_mut_fixed_in_A": 0.4,
+    "init_fixed_in_B": "slerp_prompt"
+  },
+  "summary": [
+    {
+      "comparison": "A_init_method",
+      "condition": "slerp_prompt",
+      "n": 30,
+      "gen0_mean": 0.4675011247396469,
+      "gen0_sd": 0.08961766200663675,
+      "gen7_mean": 0.6935886929432551,
+      "gen7_sd": 0.11744146318210863,
+      "delta_mean": 0.2260875682036082,
+      "delta_sd": 0.11488645659806013,
+      "max_stagnant_mean": 3.4,
+      "diversity_gen7_mean": 0.03713045663303799
+    },
+    {
+      "comparison": "A_init_method",
+      "condition": "slerp_random",
+      "n": 30,
+      "gen0_mean": 0.26907404164473214,
+      "gen0_sd": 0.0837400525482369,
+      "gen7_mean": 0.6773655871550243,
+      "gen7_sd": 0.11942764367766691,
+      "delta_mean": 0.40829154551029206,
+      "delta_sd": 0.16572130533792095,
+      "max_stagnant_mean": 2.2,
+      "diversity_gen7_mean": 0.048373117844263715
+    },
+    {
+      "comparison": "A_init_method",
+      "condition": "gaussian",
+      "n": 30,
+      "gen0_mean": 0.16556900118788084,
+      "gen0_sd": 0.04636579698884545,
+      "gen7_mean": 0.6272833446661631,
+      "gen7_sd": 0.11582724542804672,
+      "delta_mean": 0.4617143434782823,
+      "delta_sd": 0.1331222757127854,
+      "max_stagnant_mean": 1.4666666666666666,
+      "diversity_gen7_mean": 0.044319373369216916
+    },
+    {
+      "comparison": "B_mutation_rate",
+      "condition": "p_mut=0.0",
+      "n": 30,
+      "gen0_mean": 0.4617708692948023,
+      "gen0_sd": 0.0810639494619037,
+      "gen7_mean": 0.6938596407572428,
+      "gen7_sd": 0.10935629835597102,
+      "delta_mean": 0.2320887714624405,
+      "delta_sd": 0.10307102441040149,
+      "max_stagnant_mean": 3,
+      "diversity_gen7_mean": 0.03899753040737576
+    },
+    {
+      "comparison": "B_mutation_rate",
+      "condition": "p_mut=0.3",
+      "n": 30,
+      "gen0_mean": 0.4617708692948023,
+      "gen0_sd": 0.0810639494619037,
+      "gen7_mean": 0.7040507733821869,
+      "gen7_sd": 0.10674607527973305,
+      "delta_mean": 0.24227990408738453,
+      "delta_sd": 0.09594436304292485,
+      "max_stagnant_mean": 3.466666666666667,
+      "diversity_gen7_mean": 0.036156419383154975
+    },
+    {
+      "comparison": "B_mutation_rate",
+      "condition": "p_mut=0.5",
+      "n": 30,
+      "gen0_mean": 0.4617708692948023,
+      "gen0_sd": 0.0810639494619037,
+      "gen7_mean": 0.7030005762974422,
+      "gen7_sd": 0.09996293997218063,
+      "delta_mean": 0.24122970700263976,
+      "delta_sd": 0.08607905205597063,
+      "max_stagnant_mean": 3.2666666666666666,
+      "diversity_gen7_mean": 0.04288880957497491
+    },
+    {
+      "comparison": "B_mutation_rate",
+      "condition": "p_mut=0.0,注入なし",
+      "n": 30,
+      "gen0_mean": 0.4617708692948023,
+      "gen0_sd": 0.0810639494619037,
+      "gen7_mean": 0.46327388981978096,
+      "gen7_sd": 0.08034470235556032,
+      "delta_mean": 0.0015030205249786377,
+      "delta_sd": 0.0023765834439760753,
+      "max_stagnant_mean": 6.233333333333333,
+      "diversity_gen7_mean": 3.6027696397569445e-08
+    },
+    {
+      "comparison": "C_selection",
+      "condition": "上位選択",
+      "n": 30,
+      "gen0_mean": 0.46881297826766966,
+      "gen0_sd": 0.0901494420169481,
+      "gen7_mean": 0.6844585975011189,
+      "gen7_sd": 0.1090160839050843,
+      "delta_mean": 0.2156456192334493,
+      "delta_sd": 0.10843567181885941,
+      "max_stagnant_mean": 3.066666666666667,
+      "diversity_gen7_mean": 0.04919358518388536
+    },
+    {
+      "comparison": "C_selection",
+      "condition": "ランダム選択",
+      "n": 30,
+      "gen0_mean": 0.46881297826766966,
+      "gen0_sd": 0.0901494420169481,
+      "gen7_mean": 0.5440139035383861,
+      "gen7_sd": 0.087767838846727,
+      "delta_mean": 0.07520092527071635,
+      "delta_sd": 0.10202898182315961,
+      "max_stagnant_mean": 3,
+      "diversity_gen7_mean": 0.05650052494472928
+    }
+  ]
+}

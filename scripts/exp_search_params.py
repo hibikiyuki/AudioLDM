@@ -95,13 +95,25 @@ def make_population(method: str, base_emb, pool_embs):
 
 
 def run_one(population, target_emb, pool_embs, p_mut, n_inject=1,
-            elite=2, mu_range=(0.05, 0.15)):
-    """1試行を回し、世代ごとの記録を返す。population は破壊しない。"""
+            elite=2, mu_range=(0.05, 0.15), selection="top_k"):
+    """1試行を回し、世代ごとの記録を返す。population は破壊しない。
+
+    selection:
+      "top_k"  - 代理適合度の上位 SELECT_K 体を選択（通常の探索）
+      "random" - 適合度を無視してランダムに SELECT_K 体を選択（**対照条件**）
+
+    "random" は「世代ごとに適合度が上がるのは選択が効いているからか、
+    それとも Slerp の幾何とエリート保存で自動的にそうなるだけか」を切り分けるための対照。
+    ランダム選択でも同じだけ上昇するなら、上昇は探索の成果ではない。
+    """
     pop = [t.clone() for t in population]
     logs, prev_sel, streak = [], None, 0
     for gen in range(N_GENERATIONS):
         fit = compute_proxy_fitness(pop, target_emb)
-        sel = select_top_k(fit, k=SELECT_K)
+        if selection == "random":
+            sel = list(np.random.choice(len(pop), size=SELECT_K, replace=False))
+        else:
+            sel = select_top_k(fit, k=SELECT_K)
         sel_embs = [pop[i] for i in sel]
         cdist = centroid_distance(prev_sel, sel_embs) if prev_sel else -1.0
         streak = streak + 1 if (prev_sel and 0 <= cdist < STAGNANT_EPS) else 0
@@ -196,6 +208,24 @@ def main() -> None:
                              "condition": NO_NEW_DIRECTION,
                              "target": target, "trial": trial, **lg})
 
+    # ---- 比較C: 選択はそもそも効いているか（ランダム選択との対照） --------
+    # 「適合度が世代ごとに上がるのは当たり前ではないか」への回答。
+    # 上位選択とランダム選択の差が、選択という操作の寄与そのものになる。
+    # 差が出なければ、上昇は Slerp の幾何とエリート保存の副産物だったことになる。
+    print("[比較C] 選択の寄与  (上位選択 vs ランダム選択・初期個体群は共有)")
+    for ti, target in enumerate(TARGETS):
+        for trial in range(args.trials):
+            seed_all(3000 + ti * 100 + trial)
+            shared_pop = make_population(INIT_FIXED, base_emb, pool_embs)
+            for sel_mode, label in (("top_k", "上位選択"), ("random", "ランダム選択")):
+                seed_all(3000 + ti * 100 + trial)
+                logs = run_one(copy.deepcopy(shared_pop), target_embs[target],
+                               pool_embs, P_MUT_FIXED, elite=ELITE, mu_range=MU,
+                               selection=sel_mode)
+                for lg in logs:
+                    rows.append({"comparison": "C_selection", "condition": label,
+                                 "target": target, "trial": trial, **lg})
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     csv_path = os.path.join(OUTPUT_DIR, "runs.csv")
     with open(csv_path, "w", newline="") as f:
@@ -206,9 +236,13 @@ def main() -> None:
 
     # ---- 集計 -----------------------------------------------------------
     summary = []
-    for comp in ["A_init_method", "B_mutation_rate"]:
-        conds = INIT_METHODS if comp == "A_init_method" else \
-            ["p_mut=%.1f" % v for v in P_MUT_VALUES] + [NO_NEW_DIRECTION]
+    for comp in ["A_init_method", "B_mutation_rate", "C_selection"]:
+        if comp == "A_init_method":
+            conds = INIT_METHODS
+        elif comp == "B_mutation_rate":
+            conds = ["p_mut=%.1f" % v for v in P_MUT_VALUES] + [NO_NEW_DIRECTION]
+        else:
+            conds = ["上位選択", "ランダム選択"]
         print("\n=== %s ===" % comp)
         print("  %-18s %14s %14s %14s %8s %8s" %
               ("条件", "第0世代", "第7世代", "改善量", "最長停滞", "最終多様性"))

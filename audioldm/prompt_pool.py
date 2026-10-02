@@ -370,3 +370,20 @@ def sample_prompts(
         else:
             result.extend(random.sample(pool, extra_size))
     return result[:n]
+
+
+def load_pool_json(path: str) -> List[str]:
+    """`scripts/build_semantic_pool.py` が出力した意味方向プールを読み込む。
+
+    形式は {"terms": [...], "size": N, ...}。`terms` のみを取り出して返す。
+    現行の人手構成 PROMPT_POOL（99語）の置き換えとして
+    `AudioLDM_IEC(prompt_pool=load_pool_json(path))` のように渡す。
+    """
+    import json
+
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    terms = data["terms"] if isinstance(data, dict) else list(data)
+    if not terms:
+        raise ValueError(f"プールが空です: {path}")
+    return [str(t) for t in terms]

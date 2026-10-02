@@ -17,3 +17,8 @@ paper/
 .cache/
 # ローカル専用（マシン固有パス・許可設定を含むためコミットしない）
 .claude/settings.local.json
+
+# 意味方向プールの生成物（scripts/build_semantic_pool.py で再生成できる）
+# raw/ は MusicCaps 本体（CC BY-SA 4.0）なので再配布しない
+scripts/outputs/semantic_pool/raw/
+scripts/outputs/semantic_pool/*.pt

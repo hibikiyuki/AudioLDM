@@ -44,6 +44,8 @@ class AudioLDM_IEC:
         ddim_steps: int = 200,
         n_candidate_gen_per_text: int = 3,
         ga_mode: str = "latent",
+        injection_band: Optional[Tuple[float, float]] = None,
+        prompt_pool: Optional[List[str]] = None,
     ):
         """
         Args:
@@ -76,6 +78,19 @@ class AudioLDM_IEC:
         # initialize_population_seed_selection に base_embedding (c*) が渡された場合、
         # select_seed_winner で次の conditioning 初期化に引き継ぐための保持変数
         self._seed_selection_base_embedding: Optional[torch.Tensor] = None
+        # 初期化フェーズ（per_candidate_c=True）で候補ごとに異なる c を割り当てたか。
+        # True の場合、select_seed_winner は勝者自身の embedding を c* として引き継ぐ。
+        self._seed_selection_per_candidate_c: bool = False
+        # 変異・注入でプールから方向を引くときの類似度帯 (lo, hi)。
+        # None なら従来どおりプール全体から一様に引く。
+        # 設定すると c* との cos 類似度が帯に入る方向だけを候補にする
+        # （オープンキャンパスで確認した第二の課題＝注入が対象ジャンルから逸脱する、への対処）。
+        self.injection_band: Optional[Tuple[float, float]] = injection_band
+        # プール全体の CLAP embedding キャッシュ（帯の判定に使う。初回のみエンコード）
+        self._pool_embedding_cache: Dict[str, torch.Tensor] = {}
+        # 既定の意味方向プール。None なら人手構成の PROMPT_POOL（99語）。
+        # scripts/build_semantic_pool.py が生成した MusicCaps 由来のプールを渡せる。
+        self.prompt_pool: Optional[List[str]] = prompt_pool
         # initialize_population_conditioning で設定された基準 embedding。
         # evolve_population_conditioning の SLERP B-1/B-2 基準点として世代を通じて保持される
         # （x_TガチャからCLAP-IECに戻った際は c* がここに引き継がれる）
@@ -1066,8 +1081,15 @@ class AudioLDM_IEC:
         regen_start: float = 0.5,
         regen_end: float = 1.0,
         base_prompt_label: Optional[str] = None,
+        per_candidate_c: bool = False,
     ) -> List[Tuple[ConditioningGenotype, np.ndarray]]:
         """x_T選択フェーズ: 音響テクスチャ (x_T) の選択。
+
+        per_candidate_c=True の場合は**初期化フェーズ**として振る舞う。候補ごとに
+        プールから異なるプロンプトを引いて c_i を割り当て、x_T も個体ごとに振る。
+        利用者はプロンプトを一度も入力せずに出発点 (c*, x_T*) を選べる。
+        select_seed_winner が勝者自身の embedding を c* として第2段階へ引き継ぐ。
+        base_embedding が指定されている場合（第1段階＝ガチャへの復帰）は無視される。
 
         全個体が同一の conditioning（base prompt の CLAP embedding、SLERPなし）を持ち、
         x_T のみが個体ごとに異なる。ユーザーが select_seed_winner() で1個体を選ぶと、
@@ -1102,7 +1124,10 @@ class AudioLDM_IEC:
         self._x_T_seed = x_T_seed
         self._conditioning_x_T = None
 
+        self._seed_selection_per_candidate_c = False
+
         if base_embedding is not None:
+            # 第1段階（CLAP-IEC からガチャへ復帰）: c* を全候補で共有する
             c_base = base_embedding.clone().to(self.device)
             effective_prompt = (
                 base_prompt_label
@@ -1110,11 +1135,28 @@ class AudioLDM_IEC:
                 else f"<c*:gen{self.population.generation_number}>"
             )
             self._seed_selection_base_embedding = c_base.clone()
+            c_list = [c_base] * n_candidates
+            prompt_list = [effective_prompt] * n_candidates
+        elif per_candidate_c:
+            # 初期化フェーズ: 候補ごとに異なる c を引く（プロンプト入力なしで開始できる）
+            # 初期化では ref_embedding を渡さない＝帯を適用せず、プール全体から広く引く
+            # （出発点を決める段階なので、方向を絞る理由がない）
+            prompt_list = self._sample_pool_prompts(
+                n_candidates, ref_embedding=None, pool=prompt_pool)
+            c_list = [self._encode_text_single(p) for p in prompt_list]
+            effective_prompt = ""          # 個体ごとに異なるため共通の prompt は持たない
+            c_base = None
+            self._seed_selection_base_embedding = None
+            self._seed_selection_per_candidate_c = True
+            print(f"  [初期化] 候補ごとに異なる c を割り当て: {prompt_list}")
         else:
-            pool = prompt_pool or PROMPT_POOL
+            # 従来の x_Tガチャ: 単一プロンプトの c を全候補で共有する
+            pool = self._effective_pool(prompt_pool)
             effective_prompt = prompt if prompt else str(np.random.choice(pool))
             c_base = self._encode_text_single(effective_prompt)
             self._seed_selection_base_embedding = None
+            c_list = [c_base] * n_candidates
+            prompt_list = [effective_prompt] * n_candidates
 
         regen_meta: Dict = {}
         if inpaint_x0 is not None:
@@ -1136,19 +1178,27 @@ class AudioLDM_IEC:
                   f"({(t_end - t_start) / 25.6:.2f}秒, {regen_start:.0%}〜{regen_end:.0%})")
 
         genotypes: List[ConditioningGenotype] = []
-        for _ in range(n_candidates):
+        for i in range(n_candidates):
             ind_x_T, ind_seed = self._make_x_T()
+            cand_prompt = prompt_list[i]
             g = ConditioningGenotype(
-                embedding=c_base.clone(),
+                embedding=c_list[i].clone(),
                 x_T=ind_x_T,
-                source_prompt=effective_prompt,
+                source_prompt=cand_prompt,
                 seed=ind_seed,
                 metadata={
                     "ga_mode": "conditioning",
                     "phase": "seed_selection",
-                    "initialization": "seed_selection",
-                    "base_prompt": effective_prompt,
-                    "prompt": effective_prompt,
+                    "initialization": (
+                        "initialization_free" if self._seed_selection_per_candidate_c
+                        else "seed_selection"
+                    ),
+                    "per_candidate_c": self._seed_selection_per_candidate_c,
+                    "base_prompt": cand_prompt,
+                    "prompt": cand_prompt,
+                    # プールのどの方向から出発したかを後から辿れるようにする
+                    # （「プールに欲しい方向がなかった」ケースの特定に用いる）
+                    "pool_prompt": cand_prompt if self._seed_selection_per_candidate_c else None,
                     "x_T_seed": self._x_T_seed,
                     **regen_meta,
                 },
@@ -1190,6 +1240,14 @@ class AudioLDM_IEC:
         winner = self._seed_selection_population[winner_index]
         prompt = winner.metadata.get("base_prompt", "")
         base_embedding = self._seed_selection_base_embedding
+        # 第1段階（ガチャ復帰）かどうか。世代番号を進めるのはこの場合だけで、
+        # 初期化フェーズでは進めない（第0世代から始める）。
+        returned_from_iec = base_embedding is not None
+
+        if base_embedding is None and self._seed_selection_per_candidate_c:
+            # 初期化フェーズ: 勝者自身の c を c* として第2段階へ引き継ぐ
+            base_embedding = winner.embedding.clone().to(self.device)
+            print(f"[初期化] 出発点を確定: c* = '{prompt}' / x_T seed = {winner.seed}")
 
         results = self.initialize_population_conditioning(
             prompt=prompt,
@@ -1198,7 +1256,7 @@ class AudioLDM_IEC:
             x_T_mode="shared",
             prompt_pool=prompt_pool,
             base_embedding=base_embedding,
-            advance_generation=(base_embedding is not None),
+            advance_generation=returned_from_iec,
             weighted_b2=weighted_b2,
         )
         for g, _ in results:
@@ -1347,7 +1405,7 @@ class AudioLDM_IEC:
         print(f"[Conditioning GA] 第{self.population.generation_number}世代を生成中...")
         print(f"  プロンプト: '{prompt}'  alpha={slerp_alpha}")
 
-        pool = prompt_pool or PROMPT_POOL
+        pool = self._effective_pool(prompt_pool)
 
         if x_T_seed is None:
             x_T_seed = int(np.random.randint(0, 2**32 - 1))
@@ -1373,7 +1431,8 @@ class AudioLDM_IEC:
 
         # rand_prompt の選択は seed に依存させず、毎回グローバル乱数で行う
         if prompt_pool is None:
-            sampled_prompts = sample_prompts(self.population_size, weighted=weighted_b2)
+            sampled_prompts = self._sample_pool_prompts(
+                self.population_size, weighted=weighted_b2, ref_embedding=c_base)
         else:
             # カスタムプール指定時: 加重なしで np.random.choice
             if len(pool) >= self.population_size:
@@ -1428,6 +1487,84 @@ class AudioLDM_IEC:
         waveforms = self._generate_audio_batch_conditioning(genotypes)
         print(f"  [Conditioning GA] {len(genotypes)}個体の音声生成完了")
         return list(zip(genotypes, waveforms))
+
+    # ------------------------------------------------------------------
+    # 意味方向プールのサンプリング（注入・変異の方向を引く）
+    # ------------------------------------------------------------------
+    def _effective_pool(self, prompt_pool: Optional[List[str]] = None) -> List[str]:
+        """使用する意味方向プールを決める。
+
+        優先順位: 呼び出し時の引数 > インスタンス既定 (self.prompt_pool) > PROMPT_POOL。
+        """
+        return prompt_pool or getattr(self, "prompt_pool", None) or PROMPT_POOL
+
+    def _get_pool_embeddings(
+        self, pool: Optional[List[str]] = None
+    ) -> Dict[str, torch.Tensor]:
+        """プール全体の CLAP text embedding をキャッシュして返す（初回のみエンコード）。"""
+        pool = self._effective_pool(pool)
+        missing = [p for p in pool if p not in self._pool_embedding_cache]
+        if missing:
+            print(f"  [プール] {len(missing)}件の埋め込みを計算中...")
+            for p in missing:
+                self._pool_embedding_cache[p] = self._encode_text_single(p)
+        return self._pool_embedding_cache
+
+    def _sample_pool_prompts(
+        self,
+        n: int,
+        exclude: Optional[List[str]] = None,
+        weighted: bool = False,
+        ref_embedding: Optional[torch.Tensor] = None,
+        pool: Optional[List[str]] = None,
+    ) -> List[str]:
+        """プールから方向（プロンプト）を n 件引く。
+
+        self.injection_band が設定され、かつ ref_embedding（通常は c*）が与えられた
+        場合のみ、ref との cos 類似度が帯 [lo, hi] に入る方向だけを候補にする。
+        近すぎる方向は探索を進めず、遠すぎる方向は対象ジャンルからの逸脱を招くため、
+        その中間だけを引く。帯が狭すぎて候補が足りない場合は、帯からの距離が近い順に
+        補って必ず n 件返す（新しい方向が入らずに探索が停止するのを避けるため）。
+
+        injection_band が None（既定）の場合は従来どおりプール全体から引く。
+        """
+        if n <= 0:
+            return []
+        effective = self._effective_pool(pool)
+        band = self.injection_band
+        if band is None or ref_embedding is None:
+            if effective is PROMPT_POOL:
+                # 既定プールでは CLAP_SCORES による加重サンプリングが使える
+                return sample_prompts(n, exclude=exclude, weighted=weighted)
+            candidates = [p for p in effective if p not in (exclude or [])]
+            size = min(n, len(candidates))
+            return np.random.choice(candidates, size=size, replace=False).tolist()
+
+        lo, hi = band
+        candidates = [p for p in effective if p not in (exclude or [])]
+        embs = self._get_pool_embeddings(effective)
+
+        ref = torch.nn.functional.normalize(
+            ref_embedding.detach().flatten().float(), dim=0)
+        sims: List[Tuple[str, float]] = []
+        for p in candidates:
+            e = torch.nn.functional.normalize(
+                embs[p].detach().flatten().float().to(ref.device), dim=0)
+            sims.append((p, float(torch.dot(ref, e))))
+
+        in_band = [p for p, s in sims if lo <= s <= hi]
+        if len(in_band) >= n:
+            picked = np.random.choice(in_band, size=n, replace=False).tolist()
+        else:
+            # 帯の外から、帯までの距離が近い順に補う
+            outside = sorted(
+                ((p, min(abs(s - lo), abs(s - hi))) for p, s in sims if p not in in_band),
+                key=lambda t: t[1],
+            )
+            picked = in_band + [p for p, _ in outside[: n - len(in_band)]]
+            print(f"  [注入帯] 帯 [{lo:.2f}, {hi:.2f}] 内が {len(in_band)}件のため "
+                  f"{n - len(in_band)}件を帯の近傍から補完")
+        return picked
 
     def _make_x_T(self) -> Tuple[torch.Tensor, int]:
         """新規のノイズテンソルと seed を生成して返す（self._rng が設定されていればそれに従う）。"""
@@ -1518,7 +1655,7 @@ class AudioLDM_IEC:
         selected = [self.population.current_generation[i] for i in selected_indices]
         prompt = selected[0].metadata.get("base_prompt", "")
 
-        pool = prompt_pool or PROMPT_POOL
+        pool = self._effective_pool(prompt_pool)
         # SLERP B-1/B-2 の基準点。initialize_population_conditioning で設定された
         # ものを世代を通じて保持する（x_TガチャからCLAP-IECに戻った際は c* が
         # ここに引き継がれる）
@@ -1556,7 +1693,9 @@ class AudioLDM_IEC:
             if len(selected) == 1:
                 # 選択個体が1体の場合は Micro-SLERP のみ
                 # （プール側プロンプトの選択は seed に依存させない）
-                pool_prompt = sample_prompts(1, exclude=[prompt], weighted=weighted_b2)[0]
+                pool_prompt = self._sample_pool_prompts(
+                    1, exclude=[prompt], weighted=weighted_b2,
+                    ref_embedding=c_base, pool=prompt_pool)[0]
                 c_pool = self._encode_text_single(pool_prompt)
                 child = mutate_conditioning_micro_slerp(
                     selected[0],
@@ -1590,7 +1729,9 @@ class AudioLDM_IEC:
                 # p_mut に応じて固定数の個体に Micro-SLERP 変異を適用
                 if mutate_flags[slot_idx]:
                     # プール側プロンプトの選択は seed に依存させない
-                    pool_prompt = sample_prompts(1, exclude=[prompt], weighted=weighted_b2)[0]
+                    pool_prompt = self._sample_pool_prompts(
+                    1, exclude=[prompt], weighted=weighted_b2,
+                    ref_embedding=c_base, pool=prompt_pool)[0]
                     c_pool = self._encode_text_single(pool_prompt)
                     mu = self._rng_uniform(*mutation_mu_range)
                     child = mutate_conditioning_micro_slerp(child, c_pool, mu=mu)
@@ -1629,9 +1770,12 @@ class AudioLDM_IEC:
         alpha_rand = 0.4
         actual_b1 = min(random_b1_count, actual_random)
         actual_b2 = actual_random - actual_b1
-        # SLERP B-2 のプロンプト選択は seed に依存させない
-        rs_prompts = sample_prompts(actual_b2, exclude=[prompt], weighted=weighted_b2)
         ref_embedding = c_base if c_base is not None else selected[0].embedding
+        # SLERP B-2 のプロンプト選択は seed に依存させない。
+        # injection_band が設定されていれば c* との類似度帯で候補を絞る。
+        rs_prompts = self._sample_pool_prompts(
+            actual_b2, exclude=[prompt], weighted=weighted_b2,
+            ref_embedding=ref_embedding, pool=prompt_pool)
         for slot in range(actual_random):
             if slot < actual_b1:
                 # SLERP B-1: 超球面上の一様サンプルとの SLERP
@@ -1709,7 +1853,7 @@ class AudioLDM_IEC:
         異なる」比較のため）。未指定の場合はランダムなseedを自動生成し、
         各個体の metadata["x_T_seed"] に記録する。
         """
-        pool = prompt_pool or PROMPT_POOL
+        pool = self._effective_pool(prompt_pool)
 
         if x_T_seed is None:
             x_T_seed = int(np.random.randint(0, 2**32 - 1))

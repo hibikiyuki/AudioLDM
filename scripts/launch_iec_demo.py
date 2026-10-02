@@ -53,9 +53,38 @@ def main():
                         help="お題(ターゲットプロンプト)の識別子")
     parser.add_argument("--order", type=str, default=None,
                         help="提示順 (例: AB / BA)")
+    parser.add_argument("--translate_backend", type=str, default="auto",
+                        choices=["auto", "google", "marian", "none"],
+                        help="手打ち条件の日→英翻訳 (既定: auto)。\n"
+                             "google: Cloud Translation API v2。要 GOOGLE_TRANSLATE_API_KEY。\n"
+                             "        逆翻訳も表示できるのでユーザスタディ推奨\n"
+                             "marian: ローカル opus-mt-ja-en。品質不十分（誤訳の実例あり）\n"
+                             "none:   素通し")
+    parser.add_argument("--semantic_pool", type=str, default=None,
+                        help="意味方向プールのJSON (scripts/build_semantic_pool.py の出力)。\n"
+                             "未指定なら人手構成の99語プールを使う")
+    parser.add_argument("--injection_band", type=str, default=None,
+                        help="変異・注入でプールから引く方向を、c* との cos 類似度が\n"
+                             "この帯に入るものに限る。推奨: 0.50,0.80\n"
+                             "(MusicCaps プール1,407方向での実測分布に基づく。\n"
+                             " 中央値 0.363 / 75%tile 0.528 / 90%tile 0.661)\n"
+                             "未指定ならプール全体から引く")
     parser.add_argument("--output_dir", type=str, default="./output/iec_gradio",
                         help="セッション保存先のルート (ユーザスタディ時は ./output/iec_user_study 推奨)")
     args = parser.parse_args()
+
+    injection_band = None
+    if args.injection_band:
+        lo, hi = (float(v) for v in args.injection_band.split(","))
+        if not (lo < hi):
+            parser.error("--injection_band は lo,hi で lo < hi にしてください")
+        injection_band = (lo, hi)
+
+    semantic_pool = None
+    if args.semantic_pool:
+        from audioldm.prompt_pool import load_pool_json
+        semantic_pool = load_pool_json(args.semantic_pool)
+        print(f"意味方向プール: {args.semantic_pool} ({len(semantic_pool)} 方向)")
 
     print("=" * 70)
     print("CLAP-IEC デモ: x_Tガチャ ↔ 意味空間IEC")
@@ -84,6 +113,9 @@ def main():
             target_prompt_id=args.target_prompt_id,
             order=args.order,
             output_dir=args.output_dir,
+            injection_band=injection_band,
+            prompt_pool=semantic_pool,
+            translate_backend=args.translate_backend,
         )
     except KeyboardInterrupt:
         print("\n\nサーバーを停止しました。")

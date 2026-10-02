@@ -149,6 +149,8 @@ def make_interface(tmp_dir: str) -> IECInterface:
     interface.interaction_log = []
     interface._presented_at = None
     # ユーザスタディ条件メタ（デフォルトは未設定）。テスト[7]で上書きする。
+    from audioldm.translate import PassthroughTranslator
+    interface.translator = PassthroughTranslator()
     interface.session_meta = {
         "condition": None,
         "participant_id": None,

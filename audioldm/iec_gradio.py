@@ -20,6 +20,11 @@ class IECInterface:
     Gradio UIのステート管理とロジック
     """
     
+    # 各インタラクションログのエントリに複製するメタ情報。
+    # 生成条件（model_name / duration / ddim_steps など）はここに含めず、
+    # session_meta.json にのみ保存する。
+    PER_ENTRY_META_KEYS = ("condition", "participant_id", "target_prompt_id", "order")
+
     def __init__(
         self,
         model_name: str = "audioldm-s-full-v2",
@@ -30,9 +35,17 @@ class IECInterface:
         participant_id: Optional[str] = None,
         target_prompt_id: Optional[str] = None,
         order: Optional[str] = None,
+        injection_band: Optional[Tuple[float, float]] = None,
+        prompt_pool: Optional[List[str]] = None,
+        translate_backend: str = "auto",
     ):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
+
+        # 手打ちベースライン用の日→英翻訳器。素通しに落ちていないか起動ログで確認すること。
+        from audioldm.translate import get_translator
+        self.translator = get_translator(translate_backend)
+        print(f"翻訳バックエンド: {self.translator.name}")
 
         print("AudioLDM-IECシステムを初期化中...")
         self.iec_system = AudioLDM_IEC(
@@ -40,15 +53,34 @@ class IECInterface:
             population_size=population_size,
             duration=duration,
             ga_mode="latent",
+            injection_band=injection_band,
+            prompt_pool=prompt_pool,
         )
 
         # ユーザスタディ用のセッションメタ情報
         # condition: "A"(2軸交互探索) / "B"(単軸 CLAP-IEC) など。未指定なら通常利用。
+        #
+        # 生成条件も必ず記録する。ユーザスタディの公平性は「両条件で音質・バックエンド設定が
+        # 完全一致していること」を前提にしており、それを事後に検証できる必要があるため。
+        # （launch_iec_demo.py の既定 duration は 5.0 で、2.5秒で回すには明示指定が要る。
+        #   指定を忘れたセッションが混ざっても保存データから判別できない、という事故を防ぐ）
         self.session_meta = {
             "condition": condition,
             "participant_id": participant_id,
             "target_prompt_id": target_prompt_id,
             "order": order,
+            # --- 生成条件（事後検証用） ---
+            "model_name": model_name,
+            "duration": duration,
+            "population_size": population_size,
+            "guidance_scale": getattr(self.iec_system, "guidance_scale", None),
+            "ddim_steps": getattr(self.iec_system, "ddim_steps", None),
+            "n_candidate_gen_per_text": getattr(
+                self.iec_system, "n_candidate_gen_per_text", None),
+            "device": getattr(self.iec_system, "device", None),
+            "injection_band": list(injection_band) if injection_band else None,
+            "prompt_pool_size": len(prompt_pool) if prompt_pool else None,
+            "translate_backend": getattr(self.translator, "name", None),
         }
 
         # セッション状態
@@ -215,12 +247,18 @@ class IECInterface:
         prompt: str,
         n_candidates: int,
         x_T_seed_str: str = "",
+        per_candidate_c: bool = False,
         progress=gr.Progress(),
     ) -> Tuple[List, str, str]:
-        """x_T選択フェーズの候補個体群を生成する。
+        """x_T選択フェーズ／初期化フェーズの候補個体群を生成する。
 
-        全個体が同一の conditioning（base prompt の CLAP embedding）を持ち、
-        x_T のみが異なる。ユーザーはこの中から1個体を select_seed_winner で選ぶ。
+        per_candidate_c=False（従来の x_Tガチャ）:
+            全個体が同一の conditioning（base prompt の CLAP embedding）を持ち、
+            x_T のみが異なる。音色・質感の差だけを比較試聴できる。
+
+        per_candidate_c=True（**初期化フェーズ**）:
+            候補ごとにプールから異なるプロンプトを引いて c_i を割り当てる。
+            利用者はプロンプトを一度も入力せずに出発点 (c*, x_T*) を選べる。
 
         x_T_seed_str を指定すると、候補群を生成する乱数列（各候補のx_T）が
         その seed から再現可能になる。空欄の場合はランダムなseedが自動生成される。
@@ -228,7 +266,7 @@ class IECInterface:
         Returns:
             (音声リスト, ステータスメッセージ, x_T seed入力欄の値)
         """
-        progress(0, desc="x_T候補を生成中...")
+        progress(0, desc="候補を生成中...")
 
         try:
             effective_prompt = prompt.strip() if prompt.strip() else None
@@ -242,9 +280,10 @@ class IECInterface:
 
             self.iec_system.ga_mode = "conditioning"
             self.seed_selection_results = self.iec_system.initialize_population_seed_selection(
-                prompt=effective_prompt or "",
+                prompt="" if per_candidate_c else (effective_prompt or ""),
                 n_candidates=int(n_candidates),
                 x_T_seed=x_T_seed,
+                per_candidate_c=per_candidate_c,
             )
 
             progress(0.7, desc="音声を保存中...")
@@ -254,19 +293,34 @@ class IECInterface:
                 prefix="seed_selection",
             )
 
+            cand_prompts = [
+                g.metadata.get("base_prompt", "") for g, _ in self.seed_selection_results
+            ]
+
             self.interaction_log.append({
                 "timestamp": datetime.now().isoformat(),
-                "action": "seed_selection",
-                "prompt": prompt,
+                "action": "initialization" if per_candidate_c else "seed_selection",
+                "prompt": "" if per_candidate_c else prompt,
+                "per_candidate_c": per_candidate_c,
+                # 初期化フェーズでプールのどの方向を提示したか（到達範囲の検証用）
+                "candidate_prompts": cand_prompts if per_candidate_c else None,
                 "n_candidates": int(n_candidates),
                 "x_T_seed": self.iec_system._x_T_seed,
             })
 
             progress(1.0, desc="完了!")
-            message = (
-                f"🎯 x_T候補（{len(self.seed_selection_results)}個）を生成しました。"
-                "気に入った音を1つ選んでください。"
-            )
+            if per_candidate_c:
+                listed = "／".join(cand_prompts)
+                message = (
+                    f"🎲 出発点の候補（{len(self.seed_selection_results)}個）を生成しました。"
+                    "気に入った音を1つ選んでください。\n"
+                    f"方向: {listed}"
+                )
+            else:
+                message = (
+                    f"🎯 x_T候補（{len(self.seed_selection_results)}個）を生成しました。"
+                    "気に入った音を1つ選んでください。"
+                )
             # 未指定時に自動生成されたseedも含め、再現用に入力欄へ反映する
             seed_str = str(self.iec_system._x_T_seed)
             return self.seed_selection_audio_paths, message, seed_str
@@ -732,6 +786,17 @@ class IECInterface:
             traceback.print_exc()
             return self.baseline_audio_paths, "", error_msg, x_T_seed_str
 
+    def _translate_prompt(self, text: str) -> Tuple[str, dict]:
+        """プロンプトを英訳する。翻訳器が未設定なら素通しする。
+
+        翻訳器はここだけで参照する。テストが `object.__new__` で
+        インスタンスを組み立てる場合に備え、未設定でも動くようにしてある。
+        """
+        translator = getattr(self, "translator", None)
+        if translator is None:
+            return text, {"backend": "none", "translated": False}
+        return translator.translate(text)
+
     def generate_text_baseline(
         self,
         prompt: str,
@@ -764,11 +829,22 @@ class IECInterface:
         compute_started_at = datetime.now()
         self._text_baseline_round += 1
 
+        # 日本語で書かれていれば英訳してから生成に渡す。訳文は UI に表示し、
+        # 被験者が意図と違う訳に気づいて書き直せるようにする（§9.1）。
+        prompt_ja = prompt.strip()
+        prompt_en, tr_info = self._translate_prompt(prompt_ja)
+        prompt_en = prompt_en.strip() or prompt_ja
+        # 逆翻訳。英語が読めない被験者でも訳の妥当性を判断できるようにする
+        back_ja = None
+        if tr_info.get("translated"):
+            translator = getattr(self, "translator", None)
+            back_ja = translator.back_translate(prompt_en) if translator else None
+
         try:
             # 各生成を別「世代」として保存し、多様性分析が世代推移を追えるようにする
             self.iec_system.population.generation_number = self._text_baseline_round
             self.text_baseline_results = self.iec_system.generate_text_baseline_population(
-                prompt=prompt.strip(),
+                prompt=prompt_en,
             )
 
             progress(0.7, desc="音声を保存中...")
@@ -784,7 +860,12 @@ class IECInterface:
             self.interaction_log.append({
                 "timestamp": presented_at.isoformat(),
                 "action": "text_baseline_generate",
-                "prompt": prompt.strip(),
+                "prompt": prompt_en,
+                "prompt_ja": prompt_ja,
+                "prompt_en": prompt_en,
+                "translated": tr_info.get("translated", False),
+                "translate_backend": tr_info.get("backend"),
+                "back_translation_ja": back_ja,
                 "round": self._text_baseline_round,
                 "population_size": len(self.text_baseline_results),
                 "selection_seconds": selection_seconds,
@@ -800,10 +881,13 @@ class IECInterface:
                 "### ⌨️ テキスト生成情報\n\n"
                 f"- **生成回数**: {self._text_baseline_round}\n"
                 f"- **候補数**: {len(self.text_baseline_results)}\n"
-                f"- **プロンプト**: {prompt.strip()}\n"
-                "- *進化機構なし。プロンプトを書き換えて再生成してください*"
+                f"- **入力**: {prompt_ja}\n"
+                f"- **生成に使った英文**: {prompt_en}\n"
+                + (f"- **訳を日本語に戻すと**: {back_ja}\n" if back_ja else "")
+                + "- *進化機構なし。プロンプトを書き換えて再生成してください*\n"
+                + "- *訳が意図と違っていたら、入力を書き換えてください*"
             )
-            message = f"⌨️ プロンプト『{prompt.strip()}』から {len(audio_list)} 個を生成しました（生成 {self._text_baseline_round} 回目）"
+            message = f"⌨️ 『{prompt_ja}』から {len(audio_list)} 個を生成しました（生成 {self._text_baseline_round} 回目）"
             return audio_list, info, message
 
         except Exception as e:
@@ -911,9 +995,13 @@ class IECInterface:
             history_path = os.path.join(self.session_dir, "iec_history.json")
             self.iec_system.population.save_history(history_path)
             
-            # 各ログエントリに条件・被験者メタを付与（未設定キーのみ補完）
+            # 各ログエントリに条件・被験者メタを付与（未設定キーのみ補完）。
+            # 生成条件（model_name/duration など）は session_meta.json 側にだけ持たせ、
+            # 各エントリには入れない（ログの肥大と、エントリ固有の duration 等との
+            # 意味の衝突を避けるため）。
             for entry in self.interaction_log:
-                for key, value in self.session_meta.items():
+                for key in self.PER_ENTRY_META_KEYS:
+                    value = self.session_meta.get(key)
                     if value is not None:
                         entry.setdefault(key, value)
 
