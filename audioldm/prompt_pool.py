@@ -387,3 +387,59 @@ def load_pool_json(path: str) -> List[str]:
     if not terms:
         raise ValueError(f"プールが空です: {path}")
     return [str(t) for t in terms]
+
+
+def pool_embeddings_path(pool_json_path: str, backend: str) -> str:
+    """プール JSON のパスとバックエンド名から、埋め込みファイルのパスを導く。
+
+    CLAP はバックエンドごとに別物なので、埋め込みもバックエンドごとに分ける。
+    `semantic_pool.json` → `semantic_pool_embeddings_musicldm.pt` のように対応する。
+    """
+    if pool_json_path.endswith(".pt"):
+        return pool_json_path          # 直接 .pt を指定された場合はそのまま
+    base = pool_json_path[:-len(".json")] if pool_json_path.endswith(".json") \
+        else pool_json_path
+    return f"{base}_embeddings_{backend}.pt"
+
+
+def load_pool_embeddings(
+    path: str,
+    expect_model: Optional[str] = None,
+    allow_unknown: bool = False,
+):
+    """`build_semantic_pool.py --embed` が保存した CLAP 埋め込みを読み込む。
+
+    返り値は {方向語: Tensor(1,1,512)} の辞書で、`AudioLDM_IEC` の
+    `_pool_embedding_cache` を事前充填するのに使う（注入帯の初回判定で
+    プール全件を再エンコードせずに済む）。
+
+    **モデルの照合は fail-closed。** CLAP はモデルごとに別物であり、
+    別モデルの埋め込みを使うと注入帯の判定が意味を失う（しかも落ちないので
+    気づけない）。そのため次の場合は例外にする。
+      - 保存時のモデル名が記録されていない（出所不明）
+      - 記録されたモデル名が `expect_model` と一致しない
+
+    出所不明のファイルを承知の上で使う場合のみ `allow_unknown=True` にする。
+    """
+    import torch
+
+    # 自前で保存したテンソルと文字列のみなので weights_only=True で読める
+    data = torch.load(path, map_location="cpu", weights_only=True)
+    terms = data["terms"]
+    embs = data["embeddings"]
+    saved_model = data.get("model_name")
+
+    if saved_model is None:
+        msg = (f"埋め込みにモデル名が記録されていません: {path}\n"
+               f"  どのモデルの CLAP で計算されたか判別できません。"
+               f"別モデルの埋め込みを使うと注入帯の判定が静かに壊れます。\n"
+               f"  build_semantic_pool.py --embed で作り直してください")
+        if not allow_unknown:
+            raise ValueError(msg)
+        print(f"[プール] 警告: {msg}")
+    elif expect_model is not None and saved_model != expect_model:
+        raise ValueError(
+            f"埋め込みのモデルが一致しません: 保存時={saved_model} / 使用中={expect_model}\n"
+            f"  {path} を使用中のモデルで作り直してください"
+        )
+    return {t: embs[i:i + 1] for i, t in enumerate(terms)}

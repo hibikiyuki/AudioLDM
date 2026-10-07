@@ -37,7 +37,10 @@ class IECInterface:
         order: Optional[str] = None,
         injection_band: Optional[Tuple[float, float]] = None,
         prompt_pool: Optional[List[str]] = None,
+        pool_embeddings: Optional[Dict] = None,
+        pool_embeddings_path: Optional[str] = None,
         translate_backend: str = "auto",
+        backend: str = "audioldm",
     ):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
@@ -55,6 +58,9 @@ class IECInterface:
             ga_mode="latent",
             injection_band=injection_band,
             prompt_pool=prompt_pool,
+            pool_embeddings=pool_embeddings,
+            pool_embeddings_path=pool_embeddings_path,
+            backend=backend,
         )
 
         # ユーザスタディ用のセッションメタ情報
@@ -71,7 +77,9 @@ class IECInterface:
             "order": order,
             # --- 生成条件（事後検証用） ---
             "model_name": model_name,
-            "duration": duration,
+            "backend_model": getattr(getattr(self.iec_system, "backend", None), "model_name", None),
+            "backend": backend,
+            "duration": getattr(self.iec_system, "duration", duration),
             "population_size": population_size,
             "guidance_scale": getattr(self.iec_system, "guidance_scale", None),
             "ddim_steps": getattr(self.iec_system, "ddim_steps", None),

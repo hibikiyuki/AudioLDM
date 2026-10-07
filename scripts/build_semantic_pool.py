@@ -101,7 +101,12 @@ def main() -> int:
                     help="現行の99語プールを必ず含める（比較・後方互換用）")
     ap.add_argument("--embed", action="store_true",
                     help="CLAP テキスト埋め込みを事前計算して保存する（要モデル）")
-    ap.add_argument("--model", type=str, default="audioldm-m-full")
+    ap.add_argument("--backend", type=str, default="audioldm",
+                    choices=["audioldm", "musicldm"],
+                    help="埋め込みを計算するバックエンド。CLAP はモデルごとに別物なので、\n"
+                         "使用するバックエンドごとに計算する必要がある")
+    ap.add_argument("--model", type=str, default=None,
+                    help="モデル名。未指定ならバックエンドの既定")
     ap.add_argument("--no-block", action="store_true",
                     help="録音品質語のブロックリストを適用しない")
     args = ap.parse_args()
@@ -164,7 +169,7 @@ def main() -> int:
         print(f"  {c:5d}  {t}")
 
     if not args.embed:
-        print("\n埋め込みの事前計算は --embed で行う（要モデル・GPU推奨）")
+        print("\n埋め込みの事前計算は --embed --backend {audioldm,musicldm} で行う")
         return 0
 
     # ------------------------------------------------------------------
@@ -172,20 +177,34 @@ def main() -> int:
     print(" CLAP 埋め込みの事前計算")
     print("=" * 64)
     import torch
-    from audioldm.iec_pipeline import AudioLDM_IEC
 
-    iec = AudioLDM_IEC(model_name=args.model, duration=2.5)
-    embs: Dict[str, torch.Tensor] = {}
+    from audioldm.backends import build_backend
+
+    model = args.model or (
+        "audioldm-m-full" if args.backend == "audioldm" else "ucsd-reach/musicldm")
+    be = build_backend(backend=args.backend, model_name=model,
+                       device="cuda" if torch.cuda.is_available() else "cpu",
+                       duration=None, guidance_scale=2.5, ddim_steps=200)
+    embs = []
     for i, t in enumerate(terms, 1):
-        embs[t] = iec._encode_text_single(t).cpu()
+        embs.append(be.encode_text(t).cpu())
         if i % 200 == 0 or i == len(terms):
             print(f"  {i:,}/{len(terms):,}")
 
-    emb_path = args.out_dir / "semantic_pool_embeddings.pt"
-    torch.save({"terms": terms, "embeddings": torch.cat(
-        [embs[t] for t in terms], dim=0)}, emb_path)
+    from audioldm.prompt_pool import pool_embeddings_path
+
+    emb_path = Path(pool_embeddings_path(str(pool_path), args.backend))
+    # model_name と backend を必ず記録する。これが無いと読み込み側で拒否される
+    # （別モデルの埋め込みを使うと注入帯の判定が静かに壊れるため fail-closed）
+    torch.save({
+        "terms": terms,
+        "embeddings": torch.cat(embs, dim=0),
+        "model_name": be.model_name,
+        "backend": args.backend,
+    }, emb_path)
     size_mb = emb_path.stat().st_size / 1024 ** 2
     print(f"\n✅ 埋め込みを保存: {emb_path}（{size_mb:.1f} MB）")
+    print(f"   backend={args.backend} / model={be.model_name}")
     return 0
 
 

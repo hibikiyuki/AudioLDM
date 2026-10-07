@@ -7,6 +7,7 @@ CLAP-IEC デモ専用 Gradio Web Interface Launcher
 """
 
 import argparse
+import os
 import sys
 
 from audioldm.iec_demo_gradio import launch_demo_interface
@@ -33,8 +34,16 @@ def main():
                         help="AudioLDMモデル名 (デフォルト: audioldm-m-full)")
     parser.add_argument("--population_size", type=int, default=6,
                         help="1世代あたりの個体数 (デフォルト: 6)")
-    parser.add_argument("--duration", type=float, default=5.0,
-                        help="生成する音声の長さ(秒) (デフォルト: 5.0)")
+    parser.add_argument("--backend", type=str, default="audioldm",
+                        choices=["audioldm", "musicldm"],
+                        help="生成バックエンド (デフォルト: audioldm)")
+    parser.add_argument("--duration", type=float, default=None,
+                        help="生成する音声の長さ(秒)。未指定なら各バックエンドの\n"
+                             "訓練長（audioldm: 10.0 / musicldm: 10.24）。\n"
+                             "訓練長から外れると品質が落ちるので原則そのままにする")
+    parser.add_argument("--show_variation", action="store_true",
+                        help="バリエーションガチャ（区間の振り直し）のUIを表示する。\n"
+                             "既定は非表示（評価対象外・手打ち条件に同等機能がないため）")
     parser.add_argument("--port", type=int, default=8080,
                         help="サーバーポート番号 (デフォルト: 8080)")
     parser.add_argument("--share", action="store_true",
@@ -65,9 +74,11 @@ def main():
                              "未指定なら人手構成の99語プールを使う")
     parser.add_argument("--injection_band", type=str, default=None,
                         help="変異・注入でプールから引く方向を、c* との cos 類似度が\n"
-                             "この帯に入るものに限る。推奨: 0.50,0.80\n"
-                             "(MusicCaps プール1,407方向での実測分布に基づく。\n"
-                             " 中央値 0.363 / 75%tile 0.528 / 90%tile 0.661)\n"
+                             "この帯に入るものに限る。**推奨: 0.50,0.80（両バックエンド共通）**\n"
+                             "MusicCaps プール1,407方向での実測（c*100個×3シード）:\n"
+                             "  audioldm 中央値 0.32 / 90%%tile 0.59 → 該当 17-20%%\n"
+                             "  musicldm 中央値 0.27 / 90%%tile 0.58 → 該当 14-16%%\n"
+                             "中央値は違うが上側の裾はほぼ同じなので帯は共通で使える。\n"
                              "未指定ならプール全体から引く")
     parser.add_argument("--output_dir", type=str, default="./output/iec_gradio",
                         help="セッション保存先のルート (ユーザスタディ時は ./output/iec_user_study 推奨)")
@@ -85,26 +96,16 @@ def main():
         from audioldm.prompt_pool import load_pool_json
         semantic_pool = load_pool_json(args.semantic_pool)
         print(f"意味方向プール: {args.semantic_pool} ({len(semantic_pool)} 方向)")
-
-    print("=" * 70)
-    print("CLAP-IEC デモ: x_Tガチャ ↔ 意味空間IEC")
-    print("=" * 70)
-    print(f"モデル: {args.model_name}")
-    print(f"個体数: {args.population_size}")
-    print(f"音声長: {args.duration}秒")
-    print(f"ポート: {args.port}")
-    print(f"モード: {args.mode}")
-    if args.participant_id:
-        print(f"被験者: {args.participant_id} / 条件: {args.condition} / 提示順: {args.order}")
-    print(f"公開リンク: {'有効' if args.share else '無効'}")
-    print("=" * 70)
-    print()
+        # 埋め込みの読み込みはパイプライン側で行う。バックエンド構築後でないと
+        # 実際に動いているモデル名と照合できないため（launcher は実モデルを知らない）。
 
     try:
         launch_demo_interface(
             model_name=args.model_name,
             population_size=args.population_size,
             duration=args.duration,
+            backend=args.backend,
+            show_variation=args.show_variation,
             share=args.share,
             server_port=args.port,
             mode=args.mode,
@@ -115,6 +116,7 @@ def main():
             output_dir=args.output_dir,
             injection_band=injection_band,
             prompt_pool=semantic_pool,
+            pool_embeddings_path=args.semantic_pool,
             translate_backend=args.translate_backend,
         )
     except KeyboardInterrupt:

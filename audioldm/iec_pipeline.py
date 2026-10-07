@@ -39,13 +39,16 @@ class AudioLDM_IEC:
         ckpt_path: Optional[str] = None,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         population_size: int = 6,
-        duration: float = 5.0,
+        duration: Optional[float] = None,   # None なら各バックエンドの訓練長
         guidance_scale: float = 2.5, # ガイダンススケールのデフォルト値を2.5に設定
         ddim_steps: int = 200,
         n_candidate_gen_per_text: int = 3,
         ga_mode: str = "latent",
         injection_band: Optional[Tuple[float, float]] = None,
         prompt_pool: Optional[List[str]] = None,
+        pool_embeddings: Optional[Dict[str, torch.Tensor]] = None,
+        pool_embeddings_path: Optional[str] = None,
+        backend: str = "audioldm",
     ):
         """
         Args:
@@ -61,7 +64,6 @@ class AudioLDM_IEC:
         """
         self.device = device
         self.population_size = population_size
-        self.duration = duration
         self.guidance_scale = guidance_scale
         self.ddim_steps = ddim_steps
         self.n_candidate_gen_per_text = n_candidate_gen_per_text
@@ -86,8 +88,12 @@ class AudioLDM_IEC:
         # 設定すると c* との cos 類似度が帯に入る方向だけを候補にする
         # （オープンキャンパスで確認した第二の課題＝注入が対象ジャンルから逸脱する、への対処）。
         self.injection_band: Optional[Tuple[float, float]] = injection_band
-        # プール全体の CLAP embedding キャッシュ（帯の判定に使う。初回のみエンコード）
-        self._pool_embedding_cache: Dict[str, torch.Tensor] = {}
+        # プール全体の CLAP embedding キャッシュ（帯の判定に使う。初回のみエンコード）。
+        # 事前計算済みの埋め込みを渡せば、初回判定での再エンコード（1,407件で約1分、
+        # セッション中の停止として体感される）を回避できる。
+        self._pool_embedding_cache: Dict[str, torch.Tensor] = dict(pool_embeddings or {})
+        if pool_embeddings:
+            print(f"  [プール] 事前計算済み埋め込み {len(pool_embeddings)} 件を読み込みました")
         # 既定の意味方向プール。None なら人手構成の PROMPT_POOL（99語）。
         # scripts/build_semantic_pool.py が生成した MusicCaps 由来のプールを渡せる。
         self.prompt_pool: Optional[List[str]] = prompt_pool
@@ -96,26 +102,49 @@ class AudioLDM_IEC:
         # （x_TガチャからCLAP-IECに戻った際は c* がここに引き継がれる）
         self._conditioning_c_base: Optional[torch.Tensor] = None
         
-        # AudioLDMモデルのロード
-        print(f"AudioLDMモデルをロード中: {model_name}")
-        self.latent_diffusion = build_model(
-            ckpt_path=ckpt_path,
-            model_name=model_name
+        # 生成バックエンドのロード（audioldm / musicldm）。
+        # 本手法が要求するのは c と x_T の2入力への独立介入だけなので、
+        # その境界だけを抽象化して切り替える（audioldm/backends.py）。
+        from audioldm.backends import build_backend
+
+        self.backend_name = (backend or "audioldm").lower()
+        self.backend = build_backend(
+            backend=self.backend_name, model_name=model_name, device=device,
+            duration=duration, guidance_scale=guidance_scale,
+            ddim_steps=ddim_steps, ckpt_path=ckpt_path,
         )
-        self.latent_diffusion = self.latent_diffusion.to(device)
-        self.latent_diffusion.eval()
-        
-        # 潜在空間のサイズを設定
-        self.latent_diffusion.latent_t_size = duration_to_latent_t_size(duration)
-        self.latent_diffusion.cond_stage_model.embed_mode = "text"
-        
+        self.duration = self.backend.duration
+
+        # AudioLDM バックエンドのときだけ latent_diffusion を公開する。
+        # conditioning モード以外の経路（latent GA / transform GA / スタイル転送 /
+        # 長尺生成）は AudioLDM ネイティブのまま動かすため。
+        self.latent_diffusion = getattr(self.backend, "latent_diffusion", None)
+
         # 潜在空間の形状
-        self.latent_shape = (
-            self.latent_diffusion.channels,
-            self.latent_diffusion.latent_t_size,
-            self.latent_diffusion.latent_f_size
-        )
-        
+        self.latent_shape = self.backend.latent_shape
+
+        # 事前計算済みのプール埋め込みを読む。
+        # **バックエンド構築後に行う**のが肝で、照合の基準に実際に動いているモデル名
+        # （self.backend.model_name）を使える。launcher 側でパスを推測すると、
+        # 実モデルを知らないまま別バックエンドの埋め込みを読んでしまう。
+        if pool_embeddings_path and not self._pool_embedding_cache:
+            import os as _os
+
+            from audioldm.prompt_pool import load_pool_embeddings
+            from audioldm.prompt_pool import pool_embeddings_path as _emb_path
+
+            path = _emb_path(pool_embeddings_path, self.backend_name)
+            if _os.path.exists(path):
+                self._pool_embedding_cache = load_pool_embeddings(
+                    path, expect_model=self.backend.model_name)
+                print(f"  [プール] 事前計算済み埋め込みを読み込み: {path}"
+                      f"（{len(self._pool_embedding_cache)} 件）")
+            else:
+                print(f"  [プール] ⚠ {path} が無いため、注入帯の初回判定で"
+                      f"プール全件のエンコードが走ります（数分かかります）\n"
+                      f"    python scripts/build_semantic_pool.py --embed "
+                      f"--backend {self.backend_name} で事前計算できます")
+
         # IEC個体群の初期化
         self.population = IECPopulation(population_size=population_size)
         
@@ -766,19 +795,8 @@ class AudioLDM_IEC:
 
     # B-2 SLERP 用のデフォルトプロンプトプール
     def _encode_text_single(self, prompt: str) -> torch.Tensor:
-        """テキストを CLAP text embedding (1, 1, 512) に変換する。"""
-        cond = self.latent_diffusion.cond_stage_model
-        orig_mode = cond.embed_mode
-        orig_prob = cond.unconditional_prob
-        cond.embed_mode = "text"
-        cond.unconditional_prob = 0.0
-        try:
-            with torch.no_grad():
-                emb = cond([prompt, prompt])   # (2, 1, 512)
-                return emb[0:1].clone()        # (1, 1, 512)
-        finally:
-            cond.embed_mode = orig_mode
-            cond.unconditional_prob = orig_prob
+        """テキストを CLAP text embedding (1, 1, 512) に変換する（バックエンド経由）。"""
+        return self.backend.encode_text(prompt)
 
     def compute_clap_audio_text_similarity(self, waveform: np.ndarray, text: str) -> float:
         """生成音声とプロンプトの CLAP コサイン類似度（自己整合スコア）を計算する。
@@ -1046,29 +1064,14 @@ class AudioLDM_IEC:
                 regen_start if regen_start is not None else 0.5,
                 regen_end if regen_end is not None else 1.0)
 
-        with self.latent_diffusion.ema_scope("Conditioning Batch"):
-            with torch.no_grad():
-                uc = self.latent_diffusion.cond_stage_model.get_unconditional_condition(n)
-                samples, _ = self.latent_diffusion.sample_log(
-                    cond=cond_batch,
-                    batch_size=n,
-                    ddim=True,
-                    ddim_steps=self.ddim_steps,
-                    eta=0.0,
-                    unconditional_guidance_scale=self.guidance_scale,
-                    unconditional_conditioning=uc,
-                    x_T=x_T_batch,
-                    mask=mask,
-                    x0=x0,
-                )
-                if torch.max(torch.abs(samples)) > 1e2:
-                    samples = torch.clip(samples, min=-10, max=10)
-                mel = self.latent_diffusion.decode_first_stage(samples)
-                wf_batch = self.latent_diffusion.mel_spectrogram_to_waveform(mel)
+        waveforms, samples = self.backend.generate(
+            cond_batch, x_T_batch, inpaint_x0=x0, mask=mask)
 
+        # 潜在のキャッシュ。バリエーションガチャの参照 x0 に使う。
+        # MusicLDM バックエンド（Phase A）は潜在を返さないので None になる。
         for i, g in enumerate(genotypes):
-            g.z0 = samples[i:i+1].detach()
-        return [wf_batch[i:i+1] for i in range(n)]
+            g.z0 = samples[i:i+1].detach() if samples is not None else None
+        return waveforms
 
     def initialize_population_seed_selection(
         self,
@@ -1350,6 +1353,11 @@ class AudioLDM_IEC:
             raise ValueError(f"無効なx_T選択インデックス: {index}")
 
         anchor = self._seed_selection_population[index]
+        if not self.backend.supports_inpaint:
+            raise ValueError(
+                f"バリエーションガチャは {self.backend.name} バックエンドでは使えません"
+                "（区間インペインティングに未対応）。AudioLDM バックエンドで使ってください"
+            )
         if anchor.z0 is None:
             raise ValueError(f"候補{index}の潜在表現が未キャッシュです。先にx_T選択を実行してください")
 

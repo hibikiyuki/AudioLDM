@@ -209,7 +209,11 @@ def create_demo_interface(
     output_dir: str = "./output/iec_gradio",
     injection_band=None,
     prompt_pool=None,
+    pool_embeddings=None,
+    pool_embeddings_path=None,
     translate_backend="auto",
+    backend="audioldm",
+    show_variation: bool = False,
 ) -> gr.Blocks:
     """CLAP-IEC デモ専用インターフェースを構築する。
 
@@ -231,7 +235,10 @@ def create_demo_interface(
         order=order,
         injection_band=injection_band,
         prompt_pool=prompt_pool,
+        pool_embeddings=pool_embeddings,
+        pool_embeddings_path=pool_embeddings_path,
         translate_backend=translate_backend,
+        backend=backend,
     )
     # デモは常に conditioning モードで動作する
     interface.iec_system.ga_mode = "conditioning"
@@ -298,18 +305,25 @@ def create_demo_interface(
                         label=f"候補数 N（IEC個体数 {POP} とは独立）", scale=1,
                     )
                     gacha_button = gr.Button("🎲 候補を生成", variant="primary", scale=1)
-                # 再生成する区間 [開始%, 終了%]。区間外は固定される。
+                # --- バリエーションガチャ（既定で非表示） ---
+                # 選んだ候補の区間 [開始%, 終了%] だけを塗り直して振り直す機能。
+                # 既定で隠す理由：
+                #   - ユーザスタディの評価対象ではない（プロトコル §4 のセッション
+                #     フローは 初期化 → 第2段階 → 第1段階 の三段階のみ）
+                #   - 手打ち条件に同等の機能がないため、出すと比較に交絡が入る
+                #   - MusicLDM バックエンド（Phase A）では区間インペインティングに未対応
+                # コードは残してあるので show_variation=True で復活できる
                 #   50-100=後半 / 30-70=中間(両端固定) / 0-50=前半
-                # 見た目はつまみ2つの自作スライダー、値は下の隠し Number が保持する。
-                gr.HTML(RANGE_SLIDER_HTML)
-                regen_start_num = gr.Number(
-                    value=50, elem_id="regen_start_num",
-                    elem_classes=["rs-hidden"], show_label=False, container=False)
-                regen_end_num = gr.Number(
-                    value=100, elem_id="regen_end_num",
-                    elem_classes=["rs-hidden"], show_label=False, container=False)
-                variation_button = gr.Button(
-                    "🔁 選んだ区間を振り直す", variant="secondary")
+                with gr.Group(visible=show_variation) as variation_group:
+                    gr.HTML(RANGE_SLIDER_HTML)
+                    regen_start_num = gr.Number(
+                        value=50, elem_id="regen_start_num",
+                        elem_classes=["rs-hidden"], show_label=False, container=False)
+                    regen_end_num = gr.Number(
+                        value=100, elem_id="regen_end_num",
+                        elem_classes=["rs-hidden"], show_label=False, container=False)
+                    variation_button = gr.Button(
+                        "🔁 選んだ区間を振り直す", variant="secondary")
 
                 # --- 候補グリッド（固定2列） ---
                 cand_cells, cand_audios, cand_buttons = [], [], []
@@ -662,7 +676,11 @@ def create_text_baseline_interface(
     output_dir: str = "./output/iec_gradio",
     injection_band=None,
     prompt_pool=None,
+    pool_embeddings=None,
+    pool_embeddings_path=None,
     translate_backend="auto",
+    backend="audioldm",
+    show_variation: bool = False,
 ) -> gr.Blocks:
     """テキスト手打ちベースライン専用インターフェース（ユーザスタディ 条件B）。
 
@@ -682,7 +700,10 @@ def create_text_baseline_interface(
         order=order,
         injection_band=injection_band,
         prompt_pool=prompt_pool,
+        pool_embeddings=pool_embeddings,
+        pool_embeddings_path=pool_embeddings_path,
         translate_backend=translate_backend,
+        backend=backend,
     )
     interface.iec_system.ga_mode = "conditioning"
     POP = population_size
@@ -798,7 +819,7 @@ def create_text_baseline_interface(
 def launch_demo_interface(
     model_name: str = "audioldm-m-full",
     population_size: int = 6,
-    duration: float = 2.5,
+    duration: float = None,
     share: bool = False,
     server_port: int = 8080,
     mode: str = "two_axis",
@@ -809,7 +830,11 @@ def launch_demo_interface(
     output_dir: str = "./output/iec_gradio",
     injection_band=None,
     prompt_pool=None,
+    pool_embeddings=None,
+    pool_embeddings_path=None,
     translate_backend="auto",
+    backend="audioldm",
+    show_variation: bool = False,
 ):
     """デモ専用インターフェースを起動する（mode によりUIを切り替える）。"""
     if mode == "text_baseline":
@@ -824,6 +849,7 @@ def launch_demo_interface(
             order=order,
             output_dir=output_dir,
             translate_backend=translate_backend,
+            backend=backend,
         )
     else:
         demo = create_demo_interface(
@@ -838,7 +864,11 @@ def launch_demo_interface(
             output_dir=output_dir,
             injection_band=injection_band,
             prompt_pool=prompt_pool,
+            pool_embeddings=pool_embeddings,
+            pool_embeddings_path=pool_embeddings_path,
             translate_backend=translate_backend,
+            backend=backend,
+            show_variation=show_variation,
         )
     demo.launch(share=share, server_port=server_port, server_name="0.0.0.0")
 
