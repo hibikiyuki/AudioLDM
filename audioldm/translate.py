@@ -10,14 +10,17 @@ AudioLDM は英語プロンプトを受け取るが、ユーザスタディの�
 ログには原文（prompt_ja）と訳文（prompt_en）の両方を残し、事後に翻訳品質を検証できるようにする。
 
 バックエンド:
-  - "google" : Google Cloud Translation API v2（**ユーザスタディ推奨**）。
+  - "gas"    : Google Apps Script のウェブアプリを翻訳プロキシとして使う
+               （**ユーザスタディ推奨**。API キーが要らない）。
+               環境変数 `GAS_TRANSLATE_URL` か `--gas_translate_url` で URL を渡す。
+  - "google" : Google Cloud Translation API v2（API キーが必要）。
                環境変数 `GOOGLE_TRANSLATE_API_KEY` が必要。ネットワークが必要。
                逆翻訳（en→ja）にも対応するので、英語が読めない被験者でも訳の妥当性を確認できる。
   - "marian" : ローカルの Helsinki-NLP/opus-mt-ja-en。ネットワーク不要だが**品質が不十分**。
                「緊張感のある弦楽器とブラスのファンファーレ」を誤訳する実例を確認済み。
                `pip install sentencepiece sacremoses` が必要。
   - "none"   : 素通し（入力をそのまま返す）。英語で入力する場合や、翻訳が使えない環境用。
-  - "auto"   : google → marian → none の順に使えるものを選ぶ（既定）。
+  - "auto"   : gas → google → marian → none の順に使えるものを選ぶ（既定）。
 
 使用例:
     from audioldm.translate import get_translator
@@ -188,6 +191,98 @@ class GoogleTranslator(Translator):
             return None
 
 
+class GASTranslator(Translator):
+    """Google Apps Script のウェブアプリを翻訳プロキシとして使う。
+
+    GAS 側で `LanguageApp.translate(text, source, target)` を呼び、
+    `{"code": 200, "text": "<訳文>"}` を返す実装を想定する。
+    Cloud Translation API のキーを取らずに Google 翻訳を使えるため、
+    ユーザスタディの規模ではこちらで十分。
+
+    URL は引数 `url`、無ければ環境変数 `GAS_TRANSLATE_URL` から読む。
+
+    **POST を既定にする理由**：GAS の `doGet` 実装でクエリパラメータに
+    `decodeURIComponent()` をかけていると二重デコードになり、`%` を含む入力
+    （例「音量100%の歪み」）で URIError になって翻訳が落ちる。
+    `doPost` は JSON ボディをそのまま読むのでこの問題がない。
+    GET を使う場合は `method="get"` を指定する（こちらは送信側で事前に
+    URL エンコードして二重デコードと辻褄を合わせる）。
+
+    なお GAS は POST に対して 302 を返し、実行結果を googleusercontent 上の
+    URL で配る。requests は既定でリダイレクトを追うので結果は取得できる。
+    """
+
+    name = "gas"
+
+    def __init__(self, url: Optional[str] = None, timeout: float = 20.0,
+                 method: str = "post"):
+        import os
+
+        self.url = url or os.environ.get("GAS_TRANSLATE_URL")
+        self.timeout = timeout
+        self.method = method.lower()
+        self._cache: dict = {}
+        self.available = bool(self.url)
+        if not self.available:
+            self._import_error = "URL 未設定（--gas_translate_url か環境変数 GAS_TRANSLATE_URL）"
+
+    def _call(self, text: str, source: str, target: str) -> str:
+        import requests
+
+        key = (text, source, target)
+        if key in self._cache:
+            return self._cache[key]
+
+        if self.method == "get":
+            from urllib.parse import quote
+
+            # GAS 側の decodeURIComponent と辻褄を合わせるため、ここで1回エンコードする
+            # （送信時にもう1回エンコードされ、GAS が1回デコード → スクリプトが1回デコード）
+            resp = requests.get(
+                self.url,
+                params={"text": quote(text, safe=""), "source": source, "target": target},
+                timeout=self.timeout,
+            )
+        else:
+            resp = requests.post(
+                self.url,
+                json={"text": text, "source": source, "target": target},
+                timeout=self.timeout,
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != 200:
+            raise RuntimeError(f"GAS がエラーを返しました: {data}")
+        out = str(data.get("text", "")).strip()
+        if not out:
+            raise RuntimeError(f"GAS の訳文が空です: {data}")
+        self._cache[key] = out
+        return out
+
+    def translate(self, text: str) -> Tuple[str, dict]:
+        text = (text or "").strip()
+        if not text:
+            return "", {"backend": self.name, "translated": False}
+        if not looks_japanese(text):
+            return text, {"backend": self.name, "translated": False,
+                          "reason": "not_japanese"}
+        try:
+            return self._call(text, "ja", "en"), {"backend": self.name, "translated": True}
+        except Exception as e:  # 翻訳の失敗でセッションを止めない
+            print(f"[翻訳] GAS 失敗のため原文を使用します: {e}")
+            return text, {"backend": self.name, "translated": False, "error": str(e)}
+
+    def back_translate(self, text_en: str) -> Optional[str]:
+        text_en = (text_en or "").strip()
+        if not text_en:
+            return None
+        try:
+            return self._call(text_en, "en", "ja")
+        except Exception as e:
+            print(f"[翻訳] 逆翻訳に失敗: {e}")
+            return None
+
+
 def get_translator(backend: str = "auto", **kwargs) -> Translator:
     """バックエンド名から翻訳器を作る。
 
@@ -197,6 +292,17 @@ def get_translator(backend: str = "auto", **kwargs) -> Translator:
     """
     if backend == "none":
         return PassthroughTranslator()
+
+    if backend in ("gas", "auto"):
+        tr = GASTranslator(**{k: v for k, v in kwargs.items()
+                              if k in ("url", "timeout", "method")})
+        if tr.available:
+            return tr
+        msg = f"[翻訳] GAS プロキシを使えません（{getattr(tr, '_import_error', '')}）"
+        if backend == "gas":
+            raise RuntimeError(
+                msg + "\n  export GAS_TRANSLATE_URL=... を設定してください")
+        print(msg + " → google を試します")
 
     if backend in ("google", "auto"):
         tr = GoogleTranslator(**{k: v for k, v in kwargs.items()

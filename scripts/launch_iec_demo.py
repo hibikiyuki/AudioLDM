@@ -41,6 +41,10 @@ def main():
                         help="生成する音声の長さ(秒)。未指定なら各バックエンドの\n"
                              "訓練長（audioldm: 10.0 / musicldm: 10.24）。\n"
                              "訓練長から外れると品質が落ちるので原則そのままにする")
+    parser.add_argument("--show_directions", action="store_true",
+                        help="初期化フェーズで引いた方向語を画面に表示する。\n"
+                             "既定は非表示（被験者が音ではなく語で選ぶのを防ぐため）。\n"
+                             "開発・パイロットでプールの中身を確認したいときだけ使う")
     parser.add_argument("--show_variation", action="store_true",
                         help="バリエーションガチャ（区間の振り直し）のUIを表示する。\n"
                              "既定は非表示（評価対象外・手打ち条件に同等機能がないため）")
@@ -63,12 +67,16 @@ def main():
     parser.add_argument("--order", type=str, default=None,
                         help="提示順 (例: AB / BA)")
     parser.add_argument("--translate_backend", type=str, default="auto",
-                        choices=["auto", "google", "marian", "none"],
+                        choices=["auto", "gas", "google", "marian", "none"],
                         help="手打ち条件の日→英翻訳 (既定: auto)。\n"
+                             "gas:    Google Apps Script のプロキシ。APIキー不要。推奨\n"
                              "google: Cloud Translation API v2。要 GOOGLE_TRANSLATE_API_KEY。\n"
                              "        逆翻訳も表示できるのでユーザスタディ推奨\n"
                              "marian: ローカル opus-mt-ja-en。品質不十分（誤訳の実例あり）\n"
                              "none:   素通し")
+    parser.add_argument("--gas_translate_url", type=str, default=None,
+                        help="GAS 翻訳プロキシの URL。\n"
+                             "未指定なら環境変数 GAS_TRANSLATE_URL を見る")
     parser.add_argument("--semantic_pool", type=str, default=None,
                         help="意味方向プールのJSON (scripts/build_semantic_pool.py の出力)。\n"
                              "未指定なら人手構成の99語プールを使う")
@@ -106,6 +114,7 @@ def main():
             duration=args.duration,
             backend=args.backend,
             show_variation=args.show_variation,
+            show_directions=args.show_directions,
             share=args.share,
             server_port=args.port,
             mode=args.mode,
@@ -118,6 +127,7 @@ def main():
             prompt_pool=semantic_pool,
             pool_embeddings_path=args.semantic_pool,
             translate_backend=args.translate_backend,
+            translate_url=args.gas_translate_url,
         )
     except KeyboardInterrupt:
         print("\n\nサーバーを停止しました。")

@@ -45,16 +45,34 @@ MUSICCAPS_URL = (
 )
 DEFAULT_OUT = Path("scripts/outputs/semantic_pool")
 
-# 録音品質・メタ情報の語。方向として引いても「好みの音を探す」助けにならず、
-# むしろ音質を劣化させる方向へ誘導するため除外する。
-# （MusicCaps の高頻度語には 'low quality' 1220件, 'noisy' 628件, 'amateur recording' 518件
-#   などが含まれ、素通しにすると注入の相当割合がこれらになる）
+# ── 除外する語 ────────────────────────────────────────────────────
+# 方向として引いても「好みの音を探す」助けにならない語を落とす。
+# 2026-10-12 追記：パイロットで `cover` のような語が出てきたため、
+# 録音品質語だけでなく楽曲のメタ情報・非音楽音も対象にした。
+
+# 部分一致で落とす語。どの組み合わせでも方向として不適なもの。
 BLOCK_SUBSTRINGS = (
+    # 録音品質・制作環境（MusicCaps の最高頻度帯を占める）
     "low quality", "poor quality", "bad quality", "high quality", "audio quality",
     "noisy", "noise", "amateur", "recording", "recorded", "mono", "stereo",
     "muffled", "distorted audio", "clipping", "compressed", "bitrate",
     "live performance", "studio", "microphone", "mic ", "reverb heavy",
     "background hum", "hiss", "static",
+    # 楽曲のメタ情報・出自（音響的な方向ではない）
+    "cover", "intro", "outro", "remix", "karaoke", "playback", "demo", "medley",
+    # 音楽でない音（音声・環境音）
+    "applause", "announcement", "narration", "talking", "footsteps",
+    "scuffling", "hollering", "beeping",
+)
+
+# 完全一致でのみ落とす語。単体では方向を持たないが、
+# 複合語では正当な方向になるもの。
+#   例: "music" を部分一致で落とすと `ambient music` `baroque music` など
+#       84 件の正当な方向を巻き込む
+#       "soundtrack" も `video game soundtrack` などは正当
+BLOCK_EXACT = (
+    "music", "song", "track", "tune", "sound", "sounds", "audio",
+    "soundtrack", "advertisement", "piece", "performance",
 )
 
 
@@ -71,6 +89,9 @@ def download(url: str, dest: Path) -> Path:
 
 
 def is_blocked(term: str) -> bool:
+    """除外すべき語か。部分一致と完全一致の2段で判定する。"""
+    if term in BLOCK_EXACT:
+        return True
     return any(b in term for b in BLOCK_SUBSTRINGS)
 
 

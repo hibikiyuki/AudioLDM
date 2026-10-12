@@ -140,10 +140,53 @@ RANGE_SLIDER_HTML = """
 </div>
 """
 
+# 候補音声の排他再生。別の候補を再生したら前のものを自動で止める。
+# 同時に2つ聴くケースは無く、いちいち停止を押すのが探索の負担になるため
+# （10秒提示だと特に効く）。play イベントはバブリングしないので document でキャプチャする。
+#
+# **提案条件と手打ち条件の両方に適用する。** 片方だけにすると聴取の手数に差が出て、
+# それ自体が測定対象（探索コスト）なので交絡になる。
+EXCLUSIVE_AUDIO_SNIPPET = """
+  if (!window.__iecExclusiveAudioBound) {
+    window.__iecExclusiveAudioBound = true;
+
+    // Gradio 4.x の Audio は wavesurfer.js を使い、内部の <audio> 要素を
+    // document.createElement("audio") で作るだけで **DOM に挿入しない**。
+    // 切り離された要素のイベントは document まで伝播しないので、
+    // document.addEventListener('play', ..., true) では拾えなかった。
+    // → play() の呼び出し自体を差し替え、再生した要素を記録して他を止める。
+    // wavesurfer は media の pause イベントを購読しているので（onMediaEvent("pause")）、
+    // 外から pause しても再生ボタンの状態は正しく追従する。
+    var reg = new Set();
+    window.__iecAudioRegistry = reg;              // 動作確認用
+    var origPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      reg.add(this);
+      reg.forEach(function (el) {
+        if (el !== this && !el.paused) {
+          try { el.pause(); } catch (err) { /* 無視 */ }
+        }
+      }, this);
+      return origPlay.apply(this, arguments);
+    };
+
+    // DOM に挿入された素のプレイヤー（長尺生成の出力など）も押さえる。
+    document.addEventListener('play', function (ev) {
+      if (!(ev.target instanceof HTMLMediaElement)) return;
+      reg.add(ev.target);
+    }, true);
+
+    console.log('[IEC] 排他再生を有効化しました');
+  }
+"""
+
+EXCLUSIVE_AUDIO_JS = "() => {" + EXCLUSIVE_AUDIO_SNIPPET + "}"
+
 # 区間スライダー → 隠しGradio数値入力への同期。
 # Gradio はコンポーネントを非同期マウントするため、要素が現れるまでポーリングする。
 RANGE_SLIDER_JS = """
 () => {
+""" + EXCLUSIVE_AUDIO_SNIPPET + """
   const MINGAP = 5;
   function setGradioNumber(wrapId, val) {
     const wrap = document.getElementById(wrapId);
@@ -212,8 +255,10 @@ def create_demo_interface(
     pool_embeddings=None,
     pool_embeddings_path=None,
     translate_backend="auto",
+    translate_url=None,
     backend="audioldm",
     show_variation: bool = False,
+    show_directions: bool = False,
 ) -> gr.Blocks:
     """CLAP-IEC デモ専用インターフェースを構築する。
 
@@ -238,7 +283,9 @@ def create_demo_interface(
         pool_embeddings=pool_embeddings,
         pool_embeddings_path=pool_embeddings_path,
         translate_backend=translate_backend,
+        translate_url=translate_url,
         backend=backend,
+        show_directions=show_directions,
     )
     # デモは常に conditioning モードで動作する
     interface.iec_system.ga_mode = "conditioning"
@@ -679,8 +726,10 @@ def create_text_baseline_interface(
     pool_embeddings=None,
     pool_embeddings_path=None,
     translate_backend="auto",
+    translate_url=None,
     backend="audioldm",
     show_variation: bool = False,
+    show_directions: bool = False,
 ) -> gr.Blocks:
     """テキスト手打ちベースライン専用インターフェース（ユーザスタディ 条件B）。
 
@@ -703,12 +752,15 @@ def create_text_baseline_interface(
         pool_embeddings=pool_embeddings,
         pool_embeddings_path=pool_embeddings_path,
         translate_backend=translate_backend,
+        translate_url=translate_url,
         backend=backend,
+        show_directions=show_directions,
     )
     interface.iec_system.ga_mode = "conditioning"
     POP = population_size
 
-    with gr.Blocks(title="AudioLDM Text Baseline", css=CUSTOM_CSS) as demo:
+    with gr.Blocks(title="AudioLDM Text Baseline", css=CUSTOM_CSS,
+                   js=EXCLUSIVE_AUDIO_JS) as demo:
         gr.Markdown(
             "## ⌨️ AudioLDM（方法2）\n"
             "プロンプトを入力して生成 → 気に入った音を最終候補に。"
@@ -833,8 +885,10 @@ def launch_demo_interface(
     pool_embeddings=None,
     pool_embeddings_path=None,
     translate_backend="auto",
+    translate_url=None,
     backend="audioldm",
     show_variation: bool = False,
+    show_directions: bool = False,
 ):
     """デモ専用インターフェースを起動する（mode によりUIを切り替える）。"""
     if mode == "text_baseline":
@@ -849,6 +903,7 @@ def launch_demo_interface(
             order=order,
             output_dir=output_dir,
             translate_backend=translate_backend,
+            translate_url=translate_url,
             backend=backend,
         )
     else:
@@ -867,8 +922,10 @@ def launch_demo_interface(
             pool_embeddings=pool_embeddings,
             pool_embeddings_path=pool_embeddings_path,
             translate_backend=translate_backend,
+            translate_url=translate_url,
             backend=backend,
             show_variation=show_variation,
+            show_directions=show_directions,
         )
     demo.launch(share=share, server_port=server_port, server_name="0.0.0.0")
 

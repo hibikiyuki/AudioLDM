@@ -40,14 +40,19 @@ class IECInterface:
         pool_embeddings: Optional[Dict] = None,
         pool_embeddings_path: Optional[str] = None,
         translate_backend: str = "auto",
+        translate_url: Optional[str] = None,
         backend: str = "audioldm",
+        show_directions: bool = False,
     ):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
+        # 初期化フェーズの方向語を画面に出すか（既定は出さない。上の注記参照）
+        self.show_directions = show_directions
 
         # 手打ちベースライン用の日→英翻訳器。素通しに落ちていないか起動ログで確認すること。
         from audioldm.translate import get_translator
-        self.translator = get_translator(translate_backend)
+        self.translator = get_translator(
+            translate_backend, **({"url": translate_url} if translate_url else {}))
         print(f"翻訳バックエンド: {self.translator.name}")
 
         print("AudioLDM-IECシステムを初期化中...")
@@ -318,12 +323,17 @@ class IECInterface:
 
             progress(1.0, desc="完了!")
             if per_candidate_c:
-                listed = "／".join(cand_prompts)
                 message = (
                     f"🎲 出発点の候補（{len(self.seed_selection_results)}個）を生成しました。"
-                    "気に入った音を1つ選んでください。\n"
-                    f"方向: {listed}"
+                    "気に入った音を1つ選んでください。"
                 )
+                # 方向語は**既定で被験者に見せない**。
+                # 初期化を c 未固定にしたのは「一度も言語化しない」ためであり、
+                # 語を提示すると被験者が音ではなく語で選ぶ余地が生まれて前提が崩れる。
+                # ログ（candidate_prompts）には必ず残すので、実験者は事後に確認できる。
+                # 開発・パイロット時に確認したいときだけ show_directions=True にする。
+                if self.show_directions:
+                    message += "\n［実験者用］方向: " + "／".join(cand_prompts)
             else:
                 message = (
                     f"🎯 x_T候補（{len(self.seed_selection_results)}個）を生成しました。"
