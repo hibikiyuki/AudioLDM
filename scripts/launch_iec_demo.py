@@ -41,6 +41,19 @@ def main():
                         help="生成する音声の長さ(秒)。未指定なら各バックエンドの\n"
                              "訓練長（audioldm: 10.0 / musicldm: 10.24）。\n"
                              "訓練長から外れると品質が落ちるので原則そのままにする")
+    parser.add_argument("--ddim_steps", type=int, default=50,
+                        help="DDIM のステップ数 (既定: 50)。\n"
+                             "生成時間はほぼステップ数に比例する。\n"
+                             "50 は画像LDM(Stable Diffusion)の diffusers 既定と同じ水準で、\n"
+                             "試聴で 200 との差が聴き取れなかったため採用。\n"
+                             "参考: AudioLDM 公式は 200 / diffusers の AudioLDMPipeline は 10")
+    parser.add_argument("--guidance_scale", type=float, default=2.5,
+                        help="classifier-free guidance の強さ (既定: 2.5)")
+    parser.add_argument("--present_seconds", type=float, default=None,
+                        help="被験者に提示する音声長(秒)。未指定なら生成した全長を提示。\n"
+                             "**生成長は訓練長に固定したまま、聴かせる長さだけ短くする。**\n"
+                             "保存は常に全長なので客観分析(MFCC)には影響しない。\n"
+                             "ユーザスタディでは 5.12 を推奨（探索コストが半分になる）")
     parser.add_argument("--show_directions", action="store_true",
                         help="初期化フェーズで引いた方向語を画面に表示する。\n"
                              "既定は非表示（被験者が音ではなく語で選ぶのを防ぐため）。\n"
@@ -115,6 +128,9 @@ def main():
             backend=args.backend,
             show_variation=args.show_variation,
             show_directions=args.show_directions,
+            ddim_steps=args.ddim_steps,
+            guidance_scale=args.guidance_scale,
+            present_seconds=args.present_seconds,
             share=args.share,
             server_port=args.port,
             mode=args.mode,

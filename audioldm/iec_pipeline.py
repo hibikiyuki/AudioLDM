@@ -49,6 +49,7 @@ class AudioLDM_IEC:
         pool_embeddings: Optional[Dict[str, torch.Tensor]] = None,
         pool_embeddings_path: Optional[str] = None,
         backend: str = "audioldm",
+        present_seconds: Optional[float] = None,
     ):
         """
         Args:
@@ -64,6 +65,12 @@ class AudioLDM_IEC:
         """
         self.device = device
         self.population_size = population_size
+        # 提示長（秒）。None なら全長を提示する。
+        # 生成長は訓練長に固定したまま、聴かせる長さだけを短くするための変数。
+        self.present_seconds: Optional[float] = present_seconds
+        # 提示用に切り出したファイル → 元の全長ファイル の対応。
+        # アウトペインティング等で実音声が必要な場所はここで引き戻す。
+        self.presentation_source: Dict[str, str] = {}
         self.guidance_scale = guidance_scale
         self.ddim_steps = ddim_steps
         self.n_candidate_gen_per_text = n_candidate_gen_per_text
@@ -1381,6 +1388,7 @@ class AudioLDM_IEC:
         base_embedding: Optional[torch.Tensor] = None,
         advance_generation: bool = False,
         weighted_b2: bool = False,
+        keep_base: bool = True,
     ) -> List[Tuple[ConditioningGenotype, np.ndarray]]:
         """Conditioning Vector GA の初期個体群を生成する。
 
@@ -1406,6 +1414,11 @@ class AudioLDM_IEC:
         advance_generation=True の場合、個体群を生成する前に
         self.population.generation_number を1つ進める。x_Tガチャに戻って再初期化
         する際（同じ世代番号への音声ファイル上書きを避けるため）に使用する。
+
+        keep_base=True（既定）かつ c_base が存在する場合、c_base をそのまま個体0
+        として個体群に残す（エリート保存と同じ要領）。これが無いと、利用者が
+        初期化／第1段階で選んだ音そのものが次の候補群に1つも存在せず、選んだ直後に
+        消えてしまう。残す枠を作るため B-2 SLERP 個体は population_size - 1 個になる。
         """
         if advance_generation:
             self.population.generation_number += 1
@@ -1437,26 +1450,55 @@ class AudioLDM_IEC:
             c_base = self._encode_text_single(prompt) if prompt else None  # (1, 1, 512) or None
         self._conditioning_c_base = c_base
 
+        # 出発点 c_base をそのまま残すか（残す場合、注入個体はその分1つ減る）
+        keep_base = keep_base and c_base is not None
+        n_inject = self.population_size - (1 if keep_base else 0)
+
         # rand_prompt の選択は seed に依存させず、毎回グローバル乱数で行う
         if prompt_pool is None:
             sampled_prompts = self._sample_pool_prompts(
-                self.population_size, weighted=weighted_b2, ref_embedding=c_base)
+                n_inject, weighted=weighted_b2, ref_embedding=c_base)
         else:
             # カスタムプール指定時: 加重なしで np.random.choice
-            if len(pool) >= self.population_size:
-                sampled_prompts = np.random.choice(pool, size=self.population_size, replace=False).tolist()
+            if len(pool) >= n_inject:
+                sampled_prompts = np.random.choice(pool, size=n_inject, replace=False).tolist()
             else:
                 sampled_prompts = list(np.random.permutation(pool))
-                while len(sampled_prompts) < self.population_size:
+                while len(sampled_prompts) < n_inject:
                     extra = np.random.choice(
                         pool,
-                        size=min(len(pool), self.population_size - len(sampled_prompts)),
+                        size=min(len(pool), n_inject - len(sampled_prompts)),
                         replace=False,
                     ).tolist()
                     sampled_prompts.extend(extra)
-                sampled_prompts = sampled_prompts[:self.population_size]
+                sampled_prompts = sampled_prompts[:n_inject]
 
         genotypes: List[ConditioningGenotype] = []
+
+        # 個体0: 出発点そのまま（改変なし）
+        if keep_base:
+            if x_T_mode == "shared":
+                base_x_T, base_seed = self._conditioning_x_T, x_T_seed
+            else:
+                base_x_T, base_seed = self._make_x_T()
+            base_g = ConditioningGenotype(
+                embedding=c_base.clone(),
+                x_T=base_x_T,
+                source_prompt=prompt,
+                seed=base_seed,
+                metadata={
+                    "ga_mode": "conditioning",
+                    "initialization": "base_kept",
+                    "base_prompt": prompt,
+                    "rand_prompt": "",
+                    "slerp_alpha": 0.0,
+                    "prompt": prompt,
+                    "x_T_seed": self._x_T_seed,
+                },
+            )
+            base_g.generation = self.population.generation_number
+            genotypes.append(base_g)
+
         for i, rand_prompt in enumerate(sampled_prompts):
             if x_T_mode == "shared":
                 ind_x_T = self._conditioning_x_T
@@ -2373,9 +2415,29 @@ class AudioLDM_IEC:
                 audio_data = waveform
             
             sf.write(filepath, audio_data, samplerate=16000)
-            saved_paths.append(filepath)
-        
-        print(f"音声を保存しました: {output_dir}")
+
+            # 提示長の切り出し。
+            # **生成長・提示長・保存長は別の変数である。**
+            #   生成長: 訓練長に固定する（短く生成すると品質が落ちる）
+            #   保存長: 常に全長。客観分析（MFCC）は全長で算出する
+            #   提示長: 利用者に聴かせる長さ。探索コストに直接効く
+            # 切り出し版は `_present` を付けた別ファイルにする。
+            # 分析スクリプトの走査正規表現は `_gen\\d+_ind\\d+\\.wav$` なので、
+            # この接尾辞が付いたファイルは**集計対象から自動的に外れる**。
+            present = self.present_seconds
+            if present and len(audio_data) > int(present * 16000):
+                cut = audio_data[: int(present * 16000)]
+                present_path = os.path.join(
+                    output_dir,
+                    f"{prefix}_gen{gen_num:03d}_ind{i:02d}_present.wav")
+                sf.write(present_path, cut, samplerate=16000)
+                self.presentation_source[present_path] = filepath
+                saved_paths.append(present_path)
+            else:
+                saved_paths.append(filepath)
+
+        print(f"音声を保存しました: {output_dir}"
+              + (f"（提示は先頭 {self.present_seconds} 秒）" if self.present_seconds else ""))
         return saved_paths
     
     # ------------------------------------------------------------------

@@ -259,6 +259,9 @@ def create_demo_interface(
     backend="audioldm",
     show_variation: bool = False,
     show_directions: bool = False,
+    ddim_steps: int = 50,
+    guidance_scale: float = 2.5,
+    present_seconds=None,
 ) -> gr.Blocks:
     """CLAP-IEC デモ専用インターフェースを構築する。
 
@@ -286,6 +289,9 @@ def create_demo_interface(
         translate_url=translate_url,
         backend=backend,
         show_directions=show_directions,
+        ddim_steps=ddim_steps,
+        guidance_scale=guidance_scale,
+        present_seconds=present_seconds,
     )
     # デモは常に conditioning モードで動作する
     interface.iec_system.ga_mode = "conditioning"
@@ -526,7 +532,8 @@ def create_demo_interface(
             for j in range(POP):
                 if j < n:
                     geno = interface.current_results[j][0]
-                    cap_text = IECInterface._get_individual_status(geno, j)
+                    cap_text = IECInterface._get_individual_status(
+                        geno, j, interface.show_directions)
                     cells.append(gr.update(visible=True))
                     audios.append(gr.update(value=audio_list[j]))
                     caps.append(gr.update(value=cap_text.replace("\n", "  \n")))
@@ -730,6 +737,9 @@ def create_text_baseline_interface(
     backend="audioldm",
     show_variation: bool = False,
     show_directions: bool = False,
+    ddim_steps: int = 50,
+    guidance_scale: float = 2.5,
+    present_seconds=None,
 ) -> gr.Blocks:
     """テキスト手打ちベースライン専用インターフェース（ユーザスタディ 条件B）。
 
@@ -755,6 +765,9 @@ def create_text_baseline_interface(
         translate_url=translate_url,
         backend=backend,
         show_directions=show_directions,
+        ddim_steps=ddim_steps,
+        guidance_scale=guidance_scale,
+        present_seconds=present_seconds,
     )
     interface.iec_system.ga_mode = "conditioning"
     POP = population_size
@@ -889,6 +902,9 @@ def launch_demo_interface(
     backend="audioldm",
     show_variation: bool = False,
     show_directions: bool = False,
+    ddim_steps: int = 50,
+    guidance_scale: float = 2.5,
+    present_seconds=None,
 ):
     """デモ専用インターフェースを起動する（mode によりUIを切り替える）。"""
     if mode == "text_baseline":
@@ -905,6 +921,9 @@ def launch_demo_interface(
             translate_backend=translate_backend,
             translate_url=translate_url,
             backend=backend,
+            ddim_steps=ddim_steps,
+            guidance_scale=guidance_scale,
+            present_seconds=present_seconds,
         )
     else:
         demo = create_demo_interface(
@@ -926,6 +945,9 @@ def launch_demo_interface(
             backend=backend,
             show_variation=show_variation,
             show_directions=show_directions,
+            ddim_steps=ddim_steps,
+            guidance_scale=guidance_scale,
+            present_seconds=present_seconds,
         )
     demo.launch(share=share, server_port=server_port, server_name="0.0.0.0")
 

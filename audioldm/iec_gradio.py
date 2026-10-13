@@ -43,6 +43,9 @@ class IECInterface:
         translate_url: Optional[str] = None,
         backend: str = "audioldm",
         show_directions: bool = False,
+        ddim_steps: int = 50,
+        guidance_scale: float = 2.5,
+        present_seconds: Optional[float] = None,
     ):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
@@ -66,6 +69,9 @@ class IECInterface:
             pool_embeddings=pool_embeddings,
             pool_embeddings_path=pool_embeddings_path,
             backend=backend,
+            ddim_steps=ddim_steps,
+            guidance_scale=guidance_scale,
+            present_seconds=present_seconds,
         )
 
         # ユーザスタディ用のセッションメタ情報
@@ -88,6 +94,8 @@ class IECInterface:
             "population_size": population_size,
             "guidance_scale": getattr(self.iec_system, "guidance_scale", None),
             "ddim_steps": getattr(self.iec_system, "ddim_steps", None),
+            # 生成長（duration）とは別に、実際に被験者へ提示した長さを記録する
+            "present_seconds": present_seconds,
             "n_candidate_gen_per_text": getattr(
                 self.iec_system, "n_candidate_gen_per_text", None),
             "device": getattr(self.iec_system, "device", None),
@@ -992,6 +1000,11 @@ class IECInterface:
                 if self.current_audio_paths and idx < len(self.current_audio_paths)
                 else None
             )
+            # 提示用に切り出したファイルが渡ってきた場合は全長ファイルへ引き戻す
+            # （アウトペインティングの参照音が先頭だけになってしまうのを防ぐ）
+            if audio_path:
+                audio_path = self.iec_system.presentation_source.get(
+                    audio_path, audio_path)
             wf = self.iec_system.generate_long_audio_from_conditioning_genotype(
                 genotype, duration, audio_path=audio_path)
             audio_data = wf[0, 0] if wf.ndim == 3 else wf[0]
@@ -1069,10 +1082,26 @@ class IECInterface:
         return text.strip()
 
     @staticmethod
-    def _get_individual_status(genotype, index: int) -> str:
+    def _get_individual_status(genotype, index: int,
+                               show_directions: bool = False) -> str:
+        """個体の生成元情報を人間が読めるテキストで返す。
+
+        **show_directions=False（既定）では空文字を返す。**
+        被験者に見せてはいけない情報が2種類含まれているため。
+
+        1. **プロンプト**（`base_prompt` / `rand_prompt`）
+           本手法の前提は「言語化を介さず聴いて選ぶ」ことなので、
+           語を見せると被験者が音ではなく語で選ぶ余地が生まれる。
+        2. **操作ラベル**（エリート保存 / 交叉 / 変異 / 注入）
+           提示前に個体をシャッフルしているのは、どれがエリートで
+           どれが変異体かを並び順から分からなくするためである。
+           キャプションに書いてしまうとシャッフルの意味がなくなり、
+           「これは自分が選んだ個体だ」という手がかりで選択が偏る。
+
+        実験者が開発・パイロットで中身を確認したいときだけ True にする。
         """
-        個体の生成元情報を人間が読めるテキストで返す
-        """
+        if not show_directions:
+            return ""
         meta = genotype.metadata
         lines = []
 
@@ -1168,6 +1197,8 @@ class IECInterface:
                 op_line = f"{ep}🎲 B-2初期化  α={alpha:.2f}  {rand_prompt[:22]}"
             elif init == "slerp_prompt":
                 op_line = f"{ep}🎲 B-2初期化  {rand_prompt[:28]}"
+            elif init == "base_kept":
+                op_line = f"{ep}📍 出発点そのまま"
             elif init == "random_baseline":
                 op_line = f"{ep}🎲 ベースライン  {rand_prompt[:28]}"
             elif is_elite:
@@ -1524,7 +1555,8 @@ def create_gradio_interface(
                     for i in range(population_size):
                         if i < len(interface.current_results):
                             genotype = interface.current_results[i][0]
-                            statuses.append(IECInterface._get_individual_status(genotype, i))
+                            statuses.append(IECInterface._get_individual_status(
+                                genotype, i, self.show_directions))
                         else:
                             statuses.append("")
                     return statuses
@@ -1748,7 +1780,8 @@ def create_gradio_interface(
                     for i in range(population_size):
                         if i < len(interface.st_results):
                             genotype = interface.st_results[i][0]
-                            statuses.append(IECInterface._get_individual_status(genotype, i))
+                            statuses.append(IECInterface._get_individual_status(
+                                genotype, i, self.show_directions))
                         else:
                             statuses.append("")
                     return statuses
@@ -1852,7 +1885,8 @@ def create_gradio_interface(
                     for i in range(population_size):
                         if i < len(interface.baseline_results):
                             genotype = interface.baseline_results[i][0]
-                            statuses.append(IECInterface._get_individual_status(genotype, i))
+                            statuses.append(IECInterface._get_individual_status(
+                                genotype, i, self.show_directions))
                         else:
                             statuses.append("")
                     return statuses
