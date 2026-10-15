@@ -262,6 +262,9 @@ def create_demo_interface(
     ddim_steps: int = 50,
     guidance_scale: float = 2.5,
     present_seconds=None,
+    cond_crossover: str = "extrapolate",
+    extrap_alpha_range=(1.1, 1.5),
+    anchor_floor=0.45,
 ) -> gr.Blocks:
     """CLAP-IEC デモ専用インターフェースを構築する。
 
@@ -292,6 +295,9 @@ def create_demo_interface(
         ddim_steps=ddim_steps,
         guidance_scale=guidance_scale,
         present_seconds=present_seconds,
+        cond_crossover=cond_crossover,
+        extrap_alpha_range=extrap_alpha_range,
+        anchor_floor=anchor_floor,
     )
     # デモは常に conditioning モードで動作する
     interface.iec_system.ga_mode = "conditioning"
@@ -422,6 +428,10 @@ def create_demo_interface(
                     single_start_button = gr.Button(
                         "▶ 開始", variant="primary", scale=1)
 
+                # 世代構成の既定（外挿導入に合わせて再設計）:
+                #   エリート1 + 外挿交叉3（うち round(3×0.7)=2 体に変異）+ 注入2
+                # 交叉スロットが外挿で多様性を保つので、注入を1→2に増やしても
+                # 到達度は落ちない（代理利用者シミュレーション）。μ も引き上げた。
                 with gr.Accordion("⚙️ 進化パラメータ", open=False):
                     with gr.Row():
                         alpha_slider = gr.Slider(
@@ -433,17 +443,17 @@ def create_demo_interface(
                         )
                     with gr.Row():
                         p_mut_slider = gr.Slider(
-                            minimum=0.0, maximum=1.0, value=0.5, step=0.05, label="変異確率 p_mut",
+                            minimum=0.0, maximum=1.0, value=0.7, step=0.05, label="変異確率 p_mut",
                         )
                         rand_slider = gr.Slider(
-                            minimum=0, maximum=3, value=1, step=1, label="ランダム注入数",
+                            minimum=0, maximum=3, value=2, step=1, label="ランダム注入数",
                         )
                     with gr.Row():
                         mu_min_slider = gr.Slider(
-                            minimum=0.01, maximum=0.30, value=0.10, step=0.01, label="変異 μ 下限",
+                            minimum=0.01, maximum=0.30, value=0.15, step=0.01, label="変異 μ 下限",
                         )
                         mu_max_slider = gr.Slider(
-                            minimum=0.01, maximum=0.40, value=0.25, step=0.01, label="変異 μ 上限",
+                            minimum=0.01, maximum=0.40, value=0.35, step=0.01, label="変異 μ 上限",
                         )
                     weighted_checkbox = gr.Checkbox(
                         value=True, label="加重B-2サンプリング (CLAP高スコアのプロンプトを優先)",
@@ -451,6 +461,7 @@ def create_demo_interface(
 
                 # --- 個体グリッド（固定2列） ---
                 pop_cells, pop_audios, pop_buttons, pop_caps = [], [], [], []
+                pop_star_buttons = []
                 with gr.Column(elem_classes=["pop-grid"]):
                     for i in range(POP):
                         with gr.Group(elem_classes=["cell"], visible=False) as cell:
@@ -460,11 +471,18 @@ def create_demo_interface(
                                 interactive=False, waveform_options=gr.WaveformOptions(
                                     show_recording_waveform=False),
                             )
-                            btn = gr.Button(f"個体 {i}", variant="secondary", size="sm")
+                            with gr.Row():
+                                btn = gr.Button(f"個体 {i}", variant="secondary",
+                                                size="sm", scale=2)
+                                # 最終候補は選択（次世代への親）とは独立した純粋な記録。
+                                # 手打ち条件の「★ 最終候補にする」と同じ扱いにして公平性を揃える
+                                star = gr.Button("★ 最終候補", variant="secondary",
+                                                 size="sm", scale=1)
                             cap = gr.Markdown("", elem_classes=["cell-cap"])
                         pop_cells.append(cell)
                         pop_audios.append(audio)
                         pop_buttons.append(btn)
+                        pop_star_buttons.append(star)
                         pop_caps.append(cap)
 
                 with gr.Row():
@@ -481,6 +499,19 @@ def create_demo_interface(
                     interactive=False, lines=2,
                 )
                 convergence = gr.Markdown("")
+
+                # --- 最終候補（世代をまたいで保持）---
+                gr.Markdown("---\n### ✅ 最終候補")
+                iec_final_pick_state = gr.State(None)
+                iec_final_audio = gr.Audio(
+                    label="現在の最終候補（次の世代に進んでも保持されます）",
+                    type="filepath", show_download_button=True,
+                    show_share_button=False, interactive=False,
+                )
+                iec_final_label = gr.Markdown("")
+                iec_finalize_button = gr.Button("✅ これで決定して保存", variant="primary")
+                iec_final_status = gr.Textbox(
+                    label="", value="", interactive=False, lines=2, visible=False)
 
                 gr.Markdown("---")
                 with gr.Row():
@@ -607,6 +638,24 @@ def create_demo_interface(
             )
             return build_pop_outputs(audio_list, info, msg, conv)
 
+        def make_iec_pick(idx):
+            def _fn():
+                pick = interface.make_iec_final_pick(idx)
+                if pick is None:
+                    return gr.update(), gr.update(), gr.update()
+                return (pick, gr.update(value=pick["path"]),
+                        f"第{pick['generation']}世代の個体 {idx} を最終候補にしました")
+            return _fn
+
+        def do_iec_finalize(final_pick):
+            if not final_pick:
+                return gr.update(value="⚠️ 先に「★ 最終候補」で1つ選んでください", visible=True)
+            interface.finalize_iec(final_pick)
+            return gr.update(
+                value=f"✅ 最終候補を確定し、セッションを保存しました\n📁 {interface.session_dir}",
+                visible=True,
+            )
+
         def do_back_to_gacha(pop_sel, n, lock_region, regen_start_pct, regen_end_pct):
             if not pop_sel or len(pop_sel) != 1:
                 noop_cells = [gr.update() for _ in range(MAX_CANDIDATES * 3)]
@@ -715,6 +764,11 @@ def create_demo_interface(
             inputs=[pop_selected_state, long_dur_slider],
             outputs=[long_audio_output, long_status],
         )
+        for i, star in enumerate(pop_star_buttons):
+            star.click(fn=make_iec_pick(i), inputs=[],
+                       outputs=[iec_final_pick_state, iec_final_audio, iec_final_label])
+        iec_finalize_button.click(fn=do_iec_finalize, inputs=[iec_final_pick_state],
+                                  outputs=[iec_final_status])
 
     return demo
 
@@ -905,6 +959,9 @@ def launch_demo_interface(
     ddim_steps: int = 50,
     guidance_scale: float = 2.5,
     present_seconds=None,
+    cond_crossover: str = "extrapolate",
+    extrap_alpha_range=(1.1, 1.5),
+    anchor_floor=0.45,
 ):
     """デモ専用インターフェースを起動する（mode によりUIを切り替える）。"""
     if mode == "text_baseline":
@@ -948,6 +1005,9 @@ def launch_demo_interface(
             ddim_steps=ddim_steps,
             guidance_scale=guidance_scale,
             present_seconds=present_seconds,
+            cond_crossover=cond_crossover,
+            extrap_alpha_range=extrap_alpha_range,
+            anchor_floor=anchor_floor,
         )
     demo.launch(share=share, server_port=server_port, server_name="0.0.0.0")
 

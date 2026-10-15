@@ -812,24 +812,36 @@ def slerp_conditioning(
 ) -> torch.Tensor:
     """2つの conditioning vector を球面線形補間する。
 
+    t が [0, 1] の外（外挿）でも大円上の点を返す。
+
+    方向は正規化した2ベクトルの測地線で決め、ノルムは両端のノルムを t で
+    線形補間したもの（[0, 1] の外では近い側の端のノルムで頭打ち）にする。
+    CLAP 埋め込みは単位ノルムなので結果も常に単位ノルムになる。
+    パイプラインは渡された埋め込みを再正規化しないため、ノルムがずれると
+    実質的に guidance の強さが変わってしまう。外挿ではこれを防ぐ必要がある。
+
     c0, c1: (1, 1, 512)  または任意の同形状テンソル
     Returns: 同形状テンソル
     """
     shape = c0.shape
     v0 = c0.reshape(-1).float()
     v1 = c1.reshape(-1).float()
-    v0_n = v0 / (torch.norm(v0) + 1e-8)
-    v1_n = v1 / (torch.norm(v1) + 1e-8)
+    n0, n1 = torch.norm(v0), torch.norm(v1)
+    v0_n = v0 / (n0 + 1e-8)
+    v1_n = v1 / (n1 + 1e-8)
     dot = torch.clamp(torch.dot(v0_n, v1_n), -1.0, 1.0)
     if abs(dot.item()) > threshold:
-        result = (1.0 - t) * v0 + t * v1
+        # ほぼ平行: 線形補間で近似し、方向だけを取り出す
+        direction = (1.0 - t) * v0_n + t * v1_n
     else:
         theta = torch.acos(dot)
         sin_theta = torch.sin(theta)
         s0 = torch.sin((1.0 - t) * theta) / sin_theta
         s1 = torch.sin(t * theta) / sin_theta
-        result = s0 * v0 + s1 * v1
-    return result.reshape(shape).to(c0.dtype)
+        direction = s0 * v0_n + s1 * v1_n
+    direction = direction / (torch.norm(direction) + 1e-8)
+    norm = torch.clamp((1.0 - t) * n0 + t * n1, min(n0, n1), max(n0, n1))
+    return (direction * norm).reshape(shape).to(c0.dtype)
 
 
 def sample_random_unit_embedding(
@@ -902,6 +914,75 @@ def crossover_conditioning_slerp(
         "parent2_id": parent2.id,
     })
     return child
+
+
+def crossover_conditioning_extrapolate(
+    away: ConditioningGenotype,
+    toward: ConditioningGenotype,
+    alpha: float,
+) -> ConditioningGenotype:
+    """away → toward の測地線を toward の先へ延長する（alpha > 1 で外挿）。
+
+    away には非選択個体、toward には選択個体を渡す。子は toward の複製から
+    作るので、x_T などの属性は選択個体のものを引き継ぐ。
+    alpha = 1.0 で toward そのもの、1.5 で away–toward 間の角度の半分だけ先。
+    """
+    child = toward.clone()
+    child.embedding = slerp_conditioning(away.embedding, toward.embedding, alpha)
+    child.metadata.update({
+        "operation": "crossover_conditioning_extrapolate",
+        "crossover_alpha": alpha,
+        "parent1_id": away.id,
+        "parent2_id": toward.id,
+    })
+    return child
+
+
+# 個体の出自。最終音声が「進化の産物」か「無作為に引いたもの」かを区別する。
+#   evolved     交叉・変異を一度でも経た
+#   inject      第2段階の注入（c* を中心に無作為に引く）
+#   init_inject 第2段階の初期個体群の注入（同上）
+#   start_point 初期化／第1段階で選んだ出発点そのもの
+# エリートは複製元の operation を引き継ぐので、エリートで持ち越された個体も
+# 元の出自で分類される（注入がそのまま生き残っていれば inject のまま）。
+#
+# 注入・出発点が選択の履歴を持つかは c* 次第である。c* は第2段階の間は固定だが、
+# 進化した個体をガチャに持ち帰ると、その embedding が新しい c* になる。
+# anchor_evolved はこれを記録し、carries_selection は
+# 「その個体の c が、交叉・変異を経た embedding に由来するか」を表す。
+EVOLVED_OPERATIONS = frozenset({
+    "crossover_conditioning_extrapolate", "extrapolate_then_mutate",
+    "crossover_conditioning_slerp", "crossover_then_mutate",
+    "micro_slerp_mutate", "mutate_conditioning_gaussian",
+})
+INJECT_OPERATIONS = frozenset({"random_sample", "random_sample_b1"})
+
+
+def genotype_provenance(genotype) -> Dict:
+    """個体の出自を返す（ログ・事後分析用）。"""
+    meta = getattr(genotype, "metadata", {}) or {}
+    op = meta.get("operation")
+    init = meta.get("initialization")
+    if op in EVOLVED_OPERATIONS:
+        origin = "evolved"
+    elif op in INJECT_OPERATIONS:
+        origin = "inject"
+    elif init == "base_kept":
+        origin = "start_point"
+    elif init == "slerp_prompt":
+        origin = "init_inject"
+    else:
+        origin = "other"
+    anchor_evolved = bool(meta.get("anchor_evolved", False))
+    return {
+        "origin": origin,
+        "operation": op or init,
+        "elite": bool(meta.get("elite", False)),
+        "born_generation": meta.get("born_generation"),
+        "anchor_evolved": anchor_evolved,
+        "anchor_returns": meta.get("anchor_returns", 0),
+        "carries_selection": origin == "evolved" or anchor_evolved,
+    }
 
 
 def adaptive_mutation_rate(generation: int, convergence_score: float = 0.0) -> float:

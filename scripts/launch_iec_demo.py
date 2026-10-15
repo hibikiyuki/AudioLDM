@@ -61,6 +61,17 @@ def main():
     parser.add_argument("--show_variation", action="store_true",
                         help="バリエーションガチャ（区間の振り直し）のUIを表示する。\n"
                              "既定は非表示（評価対象外・手打ち条件に同等機能がないため）")
+    parser.add_argument("--cond_crossover", type=str, default="extrapolate",
+                        choices=["extrapolate", "interpolate"],
+                        help="第2段階の交叉 (既定: extrapolate)。\n"
+                             "extrapolate: 非選択→選択の測地線を選択個体の先へ延長する。\n"
+                             "             選ばなかった個体から離れる向きに進むので個体群が縮まない\n"
+                             "interpolate: 従来の選択2体間の SLERP。世代ごとに個体群が縮む")
+    parser.add_argument("--extrap_alpha", type=str, default="1.1,1.5",
+                        help="外挿の alpha 範囲 lo,hi (既定: 1.1,1.5)。\n1.0 は選択個体そのもの（x_T 共有のため音まで同一）")
+    parser.add_argument("--anchor_floor", type=float, default=0.45,
+                        help="外挿した子の cos(子, c*) の下限 (既定: 0.45)。\n"
+                             "下回ったら alpha を縮める。負の値で無効")
     parser.add_argument("--port", type=int, default=8080,
                         help="サーバーポート番号 (デフォルト: 8080)")
     parser.add_argument("--share", action="store_true",
@@ -112,6 +123,12 @@ def main():
             parser.error("--injection_band は lo,hi で lo < hi にしてください")
         injection_band = (lo, hi)
 
+    lo, hi = (float(v) for v in args.extrap_alpha.split(","))
+    if not (1.0 <= lo <= hi):
+        parser.error("--extrap_alpha は lo,hi で 1.0 <= lo <= hi にしてください")
+    extrap_alpha_range = (lo, hi)
+    anchor_floor = args.anchor_floor if args.anchor_floor >= 0 else None
+
     semantic_pool = None
     if args.semantic_pool:
         from audioldm.prompt_pool import load_pool_json
@@ -131,6 +148,9 @@ def main():
             ddim_steps=args.ddim_steps,
             guidance_scale=args.guidance_scale,
             present_seconds=args.present_seconds,
+            cond_crossover=args.cond_crossover,
+            extrap_alpha_range=extrap_alpha_range,
+            anchor_floor=anchor_floor,
             share=args.share,
             server_port=args.port,
             mode=args.mode,

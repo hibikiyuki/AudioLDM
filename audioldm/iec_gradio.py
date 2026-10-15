@@ -12,7 +12,7 @@ from datetime import datetime
 import json
 
 from audioldm.iec_pipeline import AudioLDM_IEC
-from audioldm.iec import StyleTransferGenotype, ConditioningGenotype
+from audioldm.iec import StyleTransferGenotype, ConditioningGenotype, genotype_provenance
 
 
 class IECInterface:
@@ -46,8 +46,20 @@ class IECInterface:
         ddim_steps: int = 50,
         guidance_scale: float = 2.5,
         present_seconds: Optional[float] = None,
+        cond_crossover: str = "extrapolate",
+        extrap_alpha_range: Tuple[float, float] = (1.1, 1.5),
+        anchor_floor: Optional[float] = 0.45,
     ):
         self.output_dir = output_dir
+        # 第2段階の交叉: "extrapolate"（非選択→選択の先へ延長, 既定）/ "interpolate"（従来）
+        self.cond_crossover = cond_crossover
+        self.extrap_alpha_range = tuple(extrap_alpha_range)
+        self.anchor_floor = anchor_floor
+        if cond_crossover == "extrapolate":
+            print(f"第2段階の交叉: 外挿 alpha~U{self.extrap_alpha_range} / "
+                  f"cos(子, c*) の下限 {anchor_floor}")
+        else:
+            print("第2段階の交叉: 内挿（従来）")
         os.makedirs(output_dir, exist_ok=True)
         # 初期化フェーズの方向語を画面に出すか（既定は出さない。上の注記参照）
         self.show_directions = show_directions
@@ -102,6 +114,9 @@ class IECInterface:
             "injection_band": list(injection_band) if injection_band else None,
             "prompt_pool_size": len(prompt_pool) if prompt_pool else None,
             "translate_backend": getattr(self.translator, "name", None),
+            "cond_crossover": cond_crossover,
+            "extrap_alpha_range": list(extrap_alpha_range),
+            "anchor_floor": anchor_floor,
         }
 
         # セッション状態
@@ -228,7 +243,7 @@ class IECInterface:
             # ログに記録（生成所要時間を計測）
             presented_at = datetime.now()
             compute_seconds = (presented_at - compute_started_at).total_seconds()
-            self.interaction_log.append({
+            self._log({
                 "timestamp": presented_at.isoformat(),
                 "action": "initialize",
                 "prompt": prompt,
@@ -318,7 +333,7 @@ class IECInterface:
                 g.metadata.get("base_prompt", "") for g, _ in self.seed_selection_results
             ]
 
-            self.interaction_log.append({
+            self._log({
                 "timestamp": datetime.now().isoformat(),
                 "action": "initialization" if per_candidate_c else "seed_selection",
                 "prompt": "" if per_candidate_c else prompt,
@@ -397,7 +412,7 @@ class IECInterface:
 
             presented_at = datetime.now()
             compute_seconds = (presented_at - compute_started_at).total_seconds()
-            self.interaction_log.append({
+            self._log({
                 "timestamp": presented_at.isoformat(),
                 "action": "seed_selection_choice",
                 "winner_index": winner_index,
@@ -487,7 +502,7 @@ class IECInterface:
 
             regen_meta = self.seed_selection_results[0][0].metadata
             self._gacha_round += 1
-            self.interaction_log.append({
+            self._log({
                 "timestamp": datetime.now().isoformat(),
                 "action": "return_to_gacha",
                 "source_index": index,
@@ -570,7 +585,7 @@ class IECInterface:
 
             regen_meta = self.seed_selection_results[0][0].metadata
             self._gacha_round += 1
-            self.interaction_log.append({
+            self._log({
                 "timestamp": datetime.now().isoformat(),
                 "action": "variation_gacha",
                 "anchor_index": candidate_index,
@@ -641,6 +656,17 @@ class IECInterface:
                     "少なくとも1つの個体を選択してください", "")
 
         convergence_text = ""
+        conv_info: Dict = {}
+        # 選択した世代（＝いま提示している世代）の各個体の出自。
+        # 注入は選択の履歴を持たないので、毎世代の画面に「進化した個体」と
+        # 「無作為に引いた個体」が並ぶ。どちらが選ばれやすいかが進化の寄与の指標になる
+        presented = [genotype_provenance(g) for g, *_ in self.current_results]
+        presented_origins = [p["origin"] for p in presented]
+        selected_origins = [presented_origins[i] for i in selected_checkboxes
+                            if i < len(presented_origins)]
+        # ガチャから戻ると c* が進化個体に入れ替わり、注入もその履歴を受け継ぐ。
+        # origin だけでは区別できないので、選択の履歴を持つかを別に残す
+        presented_carries = [p["carries_selection"] for p in presented]
         compute_started_at = datetime.now()
         try:
             progress(0.2, desc=f"{len(selected_checkboxes)}個の親個体から次世代を生成中...")
@@ -655,6 +681,9 @@ class IECInterface:
                     random_b1_count=int(random_b1_count),
                     x_T_mode=x_T_mode,
                     weighted_b2=weighted_b2,
+                    crossover_type=self.cond_crossover,
+                    extrap_alpha_range=self.extrap_alpha_range,
+                    anchor_floor=self.anchor_floor,
                 )
                 convergence_text = self._format_convergence_warning(conv_info)
             else:
@@ -678,7 +707,7 @@ class IECInterface:
 
             presented_at = datetime.now()
             compute_seconds = (presented_at - compute_started_at).total_seconds()
-            self.interaction_log.append({
+            self._log({
                 "timestamp": presented_at.isoformat(),
                 "action": "evolve",
                 "selected_indices": selected_checkboxes,
@@ -695,6 +724,14 @@ class IECInterface:
                 "random_sample_count": random_sample_count,
                 "random_b1_count": random_b1_count,
                 "x_T_mode": x_T_mode,
+                # 第2段階で実際に使った交叉（外挿指定でも全個体選択なら内挿にフォールバック）
+                "cond_crossover": conv_info.get("crossover_type"),
+                "presented_origins": presented_origins,
+                "selected_origins": selected_origins,
+                "presented_carries_selection": presented_carries,
+                # 選択個体の集団多様性と重心移動（探索の縮み・停滞の事後分析用）
+                "diversity": conv_info.get("diversity"),
+                "centroid_dist": conv_info.get("centroid_dist"),
                 # 選好時間: 前世代の提示〜本選択操作までの経過秒数（聴取・比較・選択に要した時間）
                 "selection_seconds": selection_seconds,
                 # 世代生成所要時間: ボタン押下〜音声提示までの計算時間（待ち時間の評価用）
@@ -781,7 +818,7 @@ class IECInterface:
 
             presented_at = datetime.now()
             compute_seconds = (presented_at - compute_started_at).total_seconds()
-            self.interaction_log.append({
+            self._log({
                 "timestamp": presented_at.isoformat(),
                 "action": "random_baseline",
                 "prompt": prompt,
@@ -883,7 +920,7 @@ class IECInterface:
             used_seeds = [g.metadata.get("x_T_seed") for g, _ in self.text_baseline_results]
             presented_at = datetime.now()
             compute_seconds = (presented_at - compute_started_at).total_seconds()
-            self.interaction_log.append({
+            self._log({
                 "timestamp": presented_at.isoformat(),
                 "action": "text_baseline_generate",
                 "prompt": prompt_en,
@@ -933,7 +970,7 @@ class IECInterface:
         """
         if not final_pick:
             return ""
-        self.interaction_log.append({
+        self._log({
             "timestamp": datetime.now().isoformat(),
             "action": "text_baseline_final",
             "prompt": final_pick.get("prompt"),
@@ -964,7 +1001,7 @@ class IECInterface:
             )
             
             # ログに記録
-            self.interaction_log.append({
+            self._log({
                 "timestamp": datetime.now().isoformat(),
                 "action": "rollback",
                 "steps": steps,
@@ -1016,6 +1053,61 @@ class IECInterface:
             return path, f"✅ 個体{idx} を {duration:.0f}秒で生成しました"
         except Exception as e:
             return None, f"❌ エラー: {e}"
+
+    def _log(self, entry: Dict) -> None:
+        """インタラクションログに1件追記し、その場でセッションを保存する。
+
+        以前は保存が手打ち条件の「確定」ボタンにしか繋がっておらず、
+        提案条件のログは一度もディスクに書かれていなかった（2026-10-15 判明）。
+        ブラウザを閉じる・プロセスが落ちるなどでも失われないよう、毎回書き出す。
+        """
+        self.interaction_log.append(entry)
+        self._autosave()
+
+    def _autosave(self) -> None:
+        msg = self.save_session()
+        if msg.startswith("エラー"):
+            print(f"[自動保存] 失敗: {msg}")
+
+    def make_iec_final_pick(self, index: int) -> Optional[Dict]:
+        """提案条件で、現在の世代の個体を最終候補として控える（生成には関与しない）。
+
+        個体群は世代ごとに入れ替わるので、選んだ時点の出自とパスをここで固定する。
+        """
+        if not (0 <= index < len(self.current_results)):
+            return None
+        genotype = self.current_results[index][0]
+        present_path = (self.current_audio_paths[index]
+                        if index < len(self.current_audio_paths) else None)
+        source = getattr(self.iec_system, "presentation_source", {}) or {}
+        return {
+            "generation": self.iec_system.population.generation_number,
+            "index": index,
+            "path": present_path,
+            # 客観分析（MFCC）は全長で行うので、提示用の切り出しとは別に記録する
+            "full_path": source.get(present_path, present_path),
+            "provenance": genotype_provenance(genotype),
+        }
+
+    def finalize_iec(self, final_pick: Optional[Dict]) -> str:
+        """提案条件の最終音声を確定して記録する（手打ち条件の finalize_text_baseline に相当）。
+
+        `provenance.origin` が inject / init_inject / start_point の場合、その音は
+        第2段階の選択履歴を受け継いでいない（無作為に引いたものがそのまま残った）。
+        事後分析で「最終音声のうち進化の産物の割合」を出すのに使う。
+        """
+        if not final_pick:
+            return ""
+        self._log({
+            "timestamp": datetime.now().isoformat(),
+            "action": "iec_final",
+            "generation": final_pick.get("generation"),
+            "final_index": final_pick.get("index"),
+            "final_audio_path": final_pick.get("path"),
+            "final_full_audio_path": final_pick.get("full_path"),
+            "provenance": final_pick.get("provenance"),
+        })
+        return final_pick.get("path") or ""
 
     def save_session(self) -> str:
         """
@@ -1182,6 +1274,13 @@ class IECInterface:
                 p2_idx = _fmt_pop_idx(meta.get("crossover_parent2_pop_index"))
                 mu = meta.get("mu", 0.0)
                 op_line = f"{ep}🧬 交叉＋変異  {p1_idx}×{p2_idx}  α={alpha:.2f}  μ={mu:.3f}"
+            elif op in ("crossover_conditioning_extrapolate", "extrapolate_then_mutate"):
+                src = _fmt_pop_idx(meta.get("extrap_from_pop_index"))
+                dst = _fmt_pop_idx(meta.get("extrap_to_pop_index"))
+                clamp = " (下限で縮小)" if meta.get("anchor_clamped") else ""
+                op_line = f"{ep}➡️ 外挿  {src}→{dst}  α={alpha:.2f}{clamp}"
+                if op == "extrapolate_then_mutate":
+                    op_line += f"  μ={meta.get('mu', 0.0):.3f}"
             elif op == "micro_slerp_mutate":
                 mu = meta.get("mu", 0.0)
                 parent_idx = _fmt_pop_idx(meta.get("parent_pop_index"))

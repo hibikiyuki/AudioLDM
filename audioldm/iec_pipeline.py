@@ -22,6 +22,7 @@ from audioldm.iec import (
     StyleTransferGenotype, crossover_style_transfer, mutate_style_transfer,
     ConditioningGenotype, slerp_conditioning, mutate_conditioning_gaussian,
     mutate_conditioning_micro_slerp, crossover_conditioning_slerp,
+    crossover_conditioning_extrapolate, genotype_provenance,
     sample_random_unit_embedding,
     STYLE_WORD_BANK,
 )
@@ -1136,6 +1137,11 @@ class AudioLDM_IEC:
 
         self._seed_selection_per_candidate_c = False
 
+        if base_embedding is None:
+            # 新しく始めるので、c* はまだ一度も進化を経ていない
+            self._anchor_evolved = False
+            self._anchor_returns = 0
+
         if base_embedding is not None:
             # 第1段階（CLAP-IEC からガチャへ復帰）: c* を全候補で共有する
             c_base = base_embedding.clone().to(self.device)
@@ -1311,6 +1317,14 @@ class AudioLDM_IEC:
 
         individual = self.population.current_generation[index]
         c_star = individual.embedding.clone()
+
+        # 持ち帰った c* が進化の産物か。以後の第2段階では注入もこの c* を中心に
+        # 引くので、注入個体も「選択の履歴を受け継いでいる」ことになる
+        self._anchor_evolved = (
+            genotype_provenance(individual)["origin"] == "evolved"
+            or bool(individual.metadata.get("anchor_evolved", False))
+        )
+        self._anchor_returns = getattr(self, "_anchor_returns", 0) + 1
 
         inpaint_x0 = None
         if regen_start is not None or regen_end is not None:
@@ -1489,6 +1503,9 @@ class AudioLDM_IEC:
                 metadata={
                     "ga_mode": "conditioning",
                     "initialization": "base_kept",
+                    "born_generation": self.population.generation_number,
+                    "anchor_evolved": getattr(self, "_anchor_evolved", False),
+                    "anchor_returns": getattr(self, "_anchor_returns", 0),
                     "base_prompt": prompt,
                     "rand_prompt": "",
                     "slerp_alpha": 0.0,
@@ -1521,6 +1538,9 @@ class AudioLDM_IEC:
                 metadata={
                     "ga_mode": "conditioning",
                     "initialization": "slerp_prompt",
+                    "born_generation": self.population.generation_number,
+                    "anchor_evolved": getattr(self, "_anchor_evolved", False),
+                    "anchor_returns": getattr(self, "_anchor_returns", 0),
                     "base_prompt": prompt,
                     "rand_prompt": rand_prompt,
                     "slerp_alpha": slerp_alpha,
@@ -1658,6 +1678,47 @@ class AudioLDM_IEC:
         else:
             random.shuffle(a)
 
+    @staticmethod
+    def _extrap_alpha_with_anchor(
+        away: torch.Tensor,
+        toward: torch.Tensor,
+        alpha: float,
+        c_base: Optional[torch.Tensor],
+        anchor_floor: Optional[float],
+        max_halvings: int = 6,
+    ) -> Tuple[float, Optional[float], bool]:
+        """外挿の alpha を、出発点 c* からの逸脱の下限に収める。
+
+        cos(子, c*) < anchor_floor なら alpha を 1.0 に向けて半分ずつ縮める。
+        選択個体（alpha = 1.0）自体が下限を下回っている場合は、利用者がそちらへ
+        向かっていると見なして縮めない。
+
+        Returns:
+            (採用した alpha, その cos(子, c*) または None, 縮めたか)
+        """
+        if c_base is None:
+            return alpha, None, False
+        ref = F.normalize(c_base.detach().flatten().float(), dim=0)
+
+        def anchor_cos(a: float) -> float:
+            v = slerp_conditioning(away, toward, a).detach().flatten().float()
+            return float(torch.dot(F.normalize(v, dim=0), ref.to(v.device)))
+
+        cos = anchor_cos(alpha)
+        if anchor_floor is None or cos >= anchor_floor:
+            return alpha, cos, False
+        if anchor_cos(1.0) < anchor_floor:
+            return alpha, cos, False
+        a = alpha
+        for _ in range(max_halvings):
+            a = 1.0 + (a - 1.0) * 0.5
+            cos = anchor_cos(a)
+            if cos >= anchor_floor:
+                break
+        else:
+            a, cos = 1.0, anchor_cos(1.0)
+        return a, cos, True
+
     def evolve_population_conditioning(
         self,
         selected_indices: List[int],
@@ -1669,6 +1730,9 @@ class AudioLDM_IEC:
         prompt_pool: Optional[List[str]] = None,
         x_T_mode: str = "inherit",
         weighted_b2: bool = False,
+        crossover_type: str = "interpolate",
+        extrap_alpha_range: Tuple[float, float] = (1.1, 1.5),
+        anchor_floor: Optional[float] = 0.45,
     ) -> Tuple[List[Tuple[ConditioningGenotype, np.ndarray]], Dict]:
         """Conditioning Vector GA の次世代を生成する。
 
@@ -1676,6 +1740,33 @@ class AudioLDM_IEC:
           - エリート: min(elite_count, len(selected)) 体
           - ランダムサンプル: random_sample_count 体（末尾、SLERP B-1/B-2）
           - 交叉スロット: 残り体数（SLERP 交叉 + round(交叉スロット数 * p_mut) 体に Micro-SLERP 変異）
+
+        crossover_type:
+          "interpolate" - 選択個体2体の間を SLERP（alpha ~ Uniform(0.3, 0.7)）。従来の交叉
+          "extrapolate" - 非選択個体 → 選択個体 の測地線を選択個体の先へ延長する
+                          （alpha ~ Uniform(*extrap_alpha_range)）。alpha = 1.0 は選択個体
+                          そのもので、x_T 共有・DDIM 決定的のため**音まで同一**になる。
+                          下限を 1.1 にしているのは、変異のかからない枠で選択個体（＝エリート）
+                          の事実上の複製が並ぶのを避けるため（1° 未満の子が 3.3% → 0.5%）
+
+        外挿を設ける理由: 内挿だけでは子が常に親の間に入るため、世代ごとに
+        個体群が縮む（Slerp の縮約）。選択個体どうしは互いに近いので、その軸の
+        外へ出ても大きくは動かない。非選択 → 選択 の軸は「利用者が選ばなかった
+        もの」から離れる向きで、内挿では捨てていた選択の情報を使う
+        （Interactive Differential Evolution の差分ベクトルと同じ構造）。
+
+        非選択は利用者に改めて選ばせず、選ばれなかった全個体から各スロットで
+        無作為に1体を取る。選ばれなかったことは否定を意味しないが、外挿の向きは
+        世代をまたいで平均的に合っていればよく、選択の揺れには頑健である
+        （代理利用者シミュレーションで確認済み）。
+
+        非選択が1体も無い（全個体を選択）場合、その世代は内挿にフォールバックする。
+        選択が1体だけの場合も外挿は成立する（非選択 → その1体）。
+
+        anchor_floor: 外挿した子の cos(子, c*) がこの値を下回ったら、alpha を
+          1.0 に向けて縮めて下限内に戻す（出発点からの逸脱の歯止め）。
+          選択個体そのもの（alpha = 1.0）が既に下限を下回っている場合は、
+          利用者がそちらへ向かっていると見なして縮めない。None で無効。
 
         x_T_mode:
           "shared"     - 全世代・全個体でセッション固定の同一 x_T (self._conditioning_x_T)
@@ -1738,9 +1829,58 @@ class AudioLDM_IEC:
         mutate_flags = [True] * n_mutate + [False] * (crossover_slots - n_mutate)
         self._rng_shuffle(mutate_flags)
 
+        # 外挿の起点になる非選択個体（利用者がチェックしなかった全個体）
+        if crossover_type not in ("interpolate", "extrapolate"):
+            raise ValueError(f"未知の crossover_type: {crossover_type}")
+        unselected_indices = [
+            i for i in range(len(self.population.current_generation))
+            if i not in selected_indices
+        ]
+        use_extrap = crossover_type == "extrapolate" and len(unselected_indices) > 0
+        if crossover_type == "extrapolate" and not use_extrap:
+            print("  [外挿] 非選択個体が無いため、この世代は内挿にフォールバック")
+
         while len(next_gen) < actual_elite + crossover_slots:
             slot_idx = len(next_gen) - actual_elite
-            if len(selected) == 1:
+            if use_extrap:
+                from_idx = unselected_indices[self._rng_randint(0, len(unselected_indices))]
+                to_k = self._rng_randint(0, len(selected))
+                p_away = self.population.current_generation[from_idx]
+                p_to = selected[to_k]
+                alpha, anchor_cos, clamped = self._extrap_alpha_with_anchor(
+                    p_away.embedding, p_to.embedding,
+                    self._rng_uniform(*extrap_alpha_range), c_base, anchor_floor)
+                child = crossover_conditioning_extrapolate(p_away, p_to, alpha)
+                # 親（選択個体）から clone() で引き継いだ古い情報を除去する
+                for k in ("initialization", "slerp_alpha", "elite", "elite_parent_pop_index",
+                          "parent_pop_index", "crossover_parent1_pop_index",
+                          "crossover_parent2_pop_index", "mu", "pool_prompt",
+                          "crossover_type"):
+                    child.metadata.pop(k, None)
+                extrap_meta = {
+                    "extrap_from_pop_index": from_idx,              # 非選択（離れる側）
+                    "extrap_to_pop_index": selected_indices[to_k],  # 選択（向かう側）
+                    "crossover_alpha": alpha,
+                    "anchor_cos": anchor_cos,
+                    "anchor_clamped": clamped,
+                }
+                child.metadata.update(extrap_meta)
+                if mutate_flags[slot_idx]:
+                    pool_prompt = self._sample_pool_prompts(
+                        1, exclude=[prompt], weighted=weighted_b2,
+                        ref_embedding=c_base, pool=prompt_pool)[0]
+                    c_pool = self._encode_text_single(pool_prompt)
+                    mu = self._rng_uniform(*mutation_mu_range)
+                    child = mutate_conditioning_micro_slerp(child, c_pool, mu=mu)
+                    child.metadata.update({
+                        **extrap_meta,
+                        "operation": "extrapolate_then_mutate",
+                        "mu": mu,
+                        "pool_prompt": pool_prompt,
+                    })
+                # x_T は向かう側（選択個体）から引き継ぐ
+                p1, p2 = p_to, None
+            elif len(selected) == 1:
                 # 選択個体が1体の場合は Micro-SLERP のみ
                 # （プール側プロンプトの選択は seed に依存させない）
                 pool_prompt = self._sample_pool_prompts(
@@ -1811,6 +1951,9 @@ class AudioLDM_IEC:
             else:  # "elite_keep"
                 child.x_T, child.seed = self._make_x_T()
             child.generation = self.population.generation_number + 1
+            # 生まれた世代。エリートとして複製されても引き継がれるので、
+            # 最終音声が「いつ・どの操作で」生まれたかを事後に辿れる
+            child.metadata["born_generation"] = self.population.generation_number + 1
             child.metadata["base_prompt"] = prompt
             child.metadata["prompt"] = prompt
             next_gen.append(child)
@@ -1858,6 +2001,9 @@ class AudioLDM_IEC:
                     "ga_mode": "conditioning",
                     "initialization": "random_sample",
                     "operation": op_label,
+                    "born_generation": self.population.generation_number + 1,
+                    "anchor_evolved": getattr(self, "_anchor_evolved", False),
+                    "anchor_returns": getattr(self, "_anchor_returns", 0),
                     "base_prompt": prompt,
                     "prompt": prompt,
                     "rand_prompt": rs_prompt,
@@ -1877,6 +2023,8 @@ class AudioLDM_IEC:
 
         # 6. 収束情報を計算
         convergence_info = self._compute_conditioning_convergence(selected)
+        # 実際に使った交叉（外挿指定でも非選択が無ければ内挿にフォールバックしている）
+        convergence_info["crossover_type"] = "extrapolate" if use_extrap else "interpolate"
 
         waveforms = self._generate_audio_batch_conditioning(self.population.current_generation)
         return list(zip(self.population.current_generation, waveforms)), convergence_info

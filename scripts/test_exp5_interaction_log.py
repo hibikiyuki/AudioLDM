@@ -148,6 +148,11 @@ def make_interface(tmp_dir: str) -> IECInterface:
     interface._gacha_round = 1
     interface.interaction_log = []
     interface._presented_at = None
+    # 第2段階の交叉設定（IECInterface.__init__ の既定と揃える）
+    interface.show_directions = False
+    interface.cond_crossover = "extrapolate"
+    interface.extrap_alpha_range = (1.0, 1.5)
+    interface.anchor_floor = 0.45
     # ユーザスタディ条件メタ（デフォルトは未設定）。テスト[7]で上書きする。
     from audioldm.translate import PassthroughTranslator
     interface.translator = PassthroughTranslator()
